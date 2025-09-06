@@ -9,8 +9,10 @@
       margin: 0;
       height: 100%;
       background: #000;
-      color: #fff;
-      font-family: -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, Inter, Arial, sans-serif;
+      color: silver;
+      font-family: Arial, sans-serif;
+      text-transform: uppercase;
+      font-size: 50px;
     }
     .center {
       position: fixed;
@@ -19,39 +21,38 @@
       place-items: center;
     }
     .start-btn {
-      border: 1px solid #333;
+      border: none;
       background: #0a0a0a;
-      color: #fff; /* делаем текст белым */
+      color: silver;
       padding: 16px 28px;
       border-radius: 999px;
-      font-size: 18px;
+      font-size: 50px;
       cursor: pointer;
-      transition: transform .2s ease, background .2s ease, border-color .2s ease;
+      transition: transform .2s ease, background .2s ease;
       user-select: none;
     }
-    .start-btn:hover { background: #111; border-color: #444; transform: scale(1.02); }
-    .start-btn:active { transform: scale(0.98); }
+    .start-btn:hover { background: #111; transform: scale(1.05); }
+    .start-btn:active { transform: scale(0.95); }
 
     #player-wrapper { width: 0; height: 0; overflow: hidden; }
 
-    #msg { position: fixed; left: 50%; bottom: 64px; transform: translateX(-50%); font-size: 14px; opacity: 0.8; display: none; }
+    #msg { position: fixed; left: 50%; bottom: 64px; transform: translateX(-50%); font-size: 24px; opacity: 0.8; display: none; }
 
     #ticker {
       position: fixed;
-      bottom: 0;
+      top: 0;
       width: 100%;
       background: #000;
       white-space: nowrap;
       overflow: hidden;
-      border-top: 1px solid #222;
-      font-size: 14px;
-      line-height: 28px;
-      height: 28px;
+      border-bottom: 1px solid #222;
+      line-height: 60px;
+      height: 60px;
     }
     #ticker span {
       display: inline-block;
-      padding-right: 2rem;
-      color: #0ff;
+      padding-right: 4rem;
+      color: silver;
       cursor: pointer;
     }
     #ticker-content {
@@ -67,29 +68,35 @@
     #nowplaying {
       position: fixed;
       bottom: 32px;
-      left: 50%;
-      transform: translateX(-50%);
-      font-size: 14px;
+      left: 16px;
+      font-size: 24px;
       display: flex;
       align-items: center;
-      gap: 6px;
+      gap: 10px;
     }
     .dot {
-      width: 10px;
-      height: 10px;
+      width: 16px;
+      height: 16px;
       border-radius: 50%;
-      background: red;
-      animation: blink 1s infinite;
+      background: white;
+      animation: fadeblink 2s infinite;
     }
-    @keyframes blink {
-      0%, 50% { opacity: 1; }
-      25%, 75% { opacity: 0; }
+    @keyframes fadeblink {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0; }
+    }
+
+    @media (max-width: 600px) {
+      html, body { font-size: 28px; }
+      .start-btn { font-size: 36px; padding: 12px 20px; }
+      #nowplaying { font-size: 18px; }
+      #ticker { line-height: 40px; height: 40px; }
     }
   </style>
 </head>
 <body>
   <div class="center" id="gate">
-    <button class="start-btn" id="start">▶︎ Воспроизвести плейлист (аудио)</button>
+    <button class="start-btn" id="start">▶︎</button>
   </div>
 
   <div id="player-wrapper"><div id="player"></div></div>
@@ -97,7 +104,7 @@
 
   <div id="nowplaying" style="display:none;">
     <div class="dot"></div>
-    <div id="nowplaying-text">Now playing:</div>
+    <div id="nowplaying-text">СЕЙЧАС ИГРАЕТ:</div>
   </div>
 
   <div id="ticker"><div id="ticker-content"></div></div>
@@ -105,7 +112,7 @@
   <script>
     const repoUser = 'indexmod';
     const repoName = 'playlist';
-    const linksPath = ''; // корень репозитория
+    const linksPath = '';
 
     const randomizeOrder = true;
     const loop = true;
@@ -225,9 +232,8 @@
       player.loadVideoById({ videoId: vid, startSeconds: 0, suggestedQuality: 'small' });
       player.playVideo();
 
-      // обновляем надпись Now playing
       $('#nowplaying').style.display = 'flex';
-      $('#nowplaying-text').textContent = `Now playing: ${playlist[idx].label}`;
+      $('#nowplaying-text').textContent = `СЕЙЧАС ИГРАЕТ: ${playlist[idx].label}`;
     }
 
     function next() {
@@ -257,9 +263,7 @@
         return;
       }
 
-      $('#start').textContent = `▶︎ Воспроизвести ${playlist.length} трек(ов)`;
-
-      // заполняем бегущую строку
+      // бегущая строка
       const ticker = $('#ticker-content');
       ticker.innerHTML = '';
       for (let i=0; i<playlist.length; i++) {
@@ -296,7 +300,6 @@
     })();
 
     document.addEventListener('DOMContentLoaded', boot);
-
     window.onYouTubeIframeAPIReady = onYouTubeIframeAPIReady;
   </script>
 </body>
