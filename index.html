@@ -12,7 +12,7 @@
       color: silver;
       font-family: Arial, sans-serif;
       text-transform: uppercase;
-      font-size: 30px;
+      font-size: 20px;
     }
     .center {
       position: fixed;
@@ -24,9 +24,9 @@
       border: none;
       background: #333;
       color: silver;
-      padding: 16px 28px;
+      padding: 12px 20px;
       border-radius: 999px;
-      font-size: 30px;
+      font-size: 20px;
       cursor: pointer;
       transition: transform .2s ease, background .2s ease;
       user-select: none;
@@ -36,7 +36,15 @@
 
     #player-wrapper { width: 0; height: 0; overflow: hidden; }
 
-    #msg { position: fixed; left: 50%; bottom: 64px; transform: translateX(-50%); font-size: 20px; opacity: 0.8; display: none; }
+    #msg {
+      position: fixed;
+      left: 50%;
+      bottom: 64px;
+      transform: translateX(-50%);
+      font-size: 20px;
+      opacity: 0.8;
+      display: none;
+    }
 
     #ticker {
       position: fixed;
@@ -45,15 +53,15 @@
       background: #222;
       white-space: nowrap;
       overflow: hidden;
-      border-bottom: 1px solid #444;
-      line-height: 50px;
-      height: 50px;
+      line-height: 40px;
+      height: 40px;
     }
     #ticker span {
       display: inline-block;
-      padding-right: 3rem;
+      padding-right: 2rem;
       color: silver;
       cursor: pointer;
+      font-size: 20px;
     }
     #ticker-content {
       display: inline-block;
@@ -69,7 +77,7 @@
       position: fixed;
       bottom: 32px;
       left: 16px;
-      font-size: 30px; /* увеличено */
+      font-size: 20px;
       display: flex;
       align-items: center;
       gap: 8px;
@@ -84,13 +92,6 @@
     @keyframes fadeblink {
       0%, 100% { opacity: 1; }
       50% { opacity: 0; }
-    }
-
-    @media (max-width: 600px) {
-      html, body { font-size: 22px; }
-      .start-btn { font-size: 24px; padding: 12px 20px; }
-      #nowplaying { font-size: 22px; }
-      #ticker { line-height: 36px; height: 36px; }
     }
   </style>
 </head>
@@ -118,7 +119,12 @@
     const loop = true;
 
     const $ = sel => document.querySelector(sel);
-    function showMsg(text) { const el = $('#msg'); el.textContent = text; el.style.display = 'block'; setTimeout(()=>{ el.style.display = 'none'; }, 4000); }
+    function showMsg(text) {
+      const el = $('#msg');
+      el.textContent = text;
+      el.style.display = 'block';
+      setTimeout(()=>{ el.style.display = 'none'; }, 4000);
+    }
 
     function shuffle(array) {
       for (let i = array.length - 1; i > 0; i--) {
@@ -150,8 +156,10 @@
       const text = await fetch(url, {cache: 'no-store'}).then(r => r.text());
 
       let label = fileMeta.name.replace(/\.webloc$|\.url$|\.txt$/i, '');
-      label = label.replace(/youtube/gi, ''); // убираем слово youtube
-      label = label.replace(/^-+/, ''); // убираем дефис перед названием
+      label = label.replace(/youtube/gi, '');   // убираем слово youtube
+      label = label.replace(/\([^)]*\)/g, '');  // убираем скобки и содержимое
+      label = label.replace(/[-.,:;!?]/g, ' '); // убираем дефисы и знаки препинания
+      label = label.replace(/\s+/g, ' ').trim();
 
       if (name.endsWith('.txt')) {
         return { url: text.split(/\r?\n/)[0].trim(), label };
@@ -161,7 +169,8 @@
         return { url: m ? m[1].trim() : '', label };
       }
       if (name.endsWith('.webloc')) {
-        const m = text.match(/<key>URL<\/key>\s*<string>([^<]+)<\/string>/i) || text.match(/<string>(https?:\/\/[^<]+)<\/string>/i);
+        const m = text.match(/<key>URL<\/key>\s*<string>([^<]+)<\/string>/i)
+              || text.match(/<string>(https?:\/\/[^<]+)<\/string>/i);
         return { url: m ? m[1].trim() : '', label };
       }
       return { url: text.trim(), label };
@@ -272,7 +281,7 @@
       for (let i=0; i<playlist.length; i++) {
         const span = document.createElement('span');
         span.textContent = playlist[i].label;
-        span.addEventListener('click', ()=> next()); // клик по топику = следующий трек
+        span.addEventListener('click', ()=> playIndex(i));
         ticker.appendChild(span);
       }
 
@@ -280,7 +289,12 @@
         if (!player) return;
         if (ev.code === 'Space') {
           ev.preventDefault();
-          next(); // спейсбар = следующий трек
+          const st = player.getPlayerState();
+          if (st === YT.PlayerState.PLAYING) player.pauseVideo(); else player.playVideo();
+        } else if (ev.key.toLowerCase() === 'n') {
+          next();
+        } else if (ev.key.toLowerCase() === 'p') {
+          prev();
         }
       });
     }
