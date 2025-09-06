@@ -138,9 +138,7 @@
     function extractYouTubeId(url) {
       try {
         const u = new URL(url.trim());
-        if (u.hostname.includes('youtu.be')) {
-          return u.pathname.replace('/', '');
-        }
+        if (u.hostname.includes('youtu.be')) return u.pathname.replace('/', '');
         if (u.hostname.includes('youtube.com')) {
           if (u.searchParams.get('v')) return u.searchParams.get('v');
           const p = u.pathname.split('/').filter(Boolean);
@@ -157,14 +155,23 @@
       const text = await fetch(url, {cache: 'no-store'}).then(r => r.text());
 
       let label = fileMeta.name.replace(/\.webloc$|\.url$|\.txt$/i, '');
-      label = label.replace(/youtube/gi, '');   // убираем слово youtube
-      label = label.replace(/\([^)]*\)/g, '');  // убираем скобки и содержимое
-      label = label.replace(/[-.,:;!?]/g, ' '); // убираем дефисы и знаки препинания
+
+      // убираем слово youtube
+      label = label.replace(/youtube/gi, '');
+
+      // убираем содержимое в скобках (нормальные случаи)
+      label = label.replace(/\([^)]*\)/g, '');
+
+      // убираем одиночные или "прилипшие" скобки
+      label = label.replace(/[()]/g, '');
+
+      // убираем дефисы и знаки препинания
+      label = label.replace(/[-.,:;!?]/g, ' ');
+
+      // схлопываем пробелы
       label = label.replace(/\s+/g, ' ').trim();
 
-      if (name.endsWith('.txt')) {
-        return { url: text.split(/\r?\n/)[0].trim(), label };
-      }
+      if (name.endsWith('.txt')) return { url: text.split(/\r?\n/)[0].trim(), label };
       if (name.endsWith('.url')) {
         const m = text.match(/^URL=(.+)$/mi);
         return { url: m ? m[1].trim() : '', label };
@@ -203,40 +210,15 @@
     function onYouTubeIframeAPIReady() {
       player = new YT.Player('player', {
         height: '1', width: '1',
-        playerVars: {
-          autoplay: 0,
-          controls: 0,
-          modestbranding: 1,
-          rel: 0,
-          playsinline: 1,
-          fs: 0,
-          disablekb: 1
-        },
-        events: {
-          onReady: onPlayerReady,
-          onStateChange: onPlayerStateChange,
-          onError: onPlayerError
-        }
+        playerVars: { autoplay: 0, controls: 0, modestbranding: 1, rel: 0, playsinline: 1, fs: 0, disablekb: 1 },
+        events: { onReady: onPlayerReady, onStateChange: onPlayerStateChange, onError: onPlayerError }
       });
     }
 
     function onPlayerReady() {}
-
-    function onPlayerStateChange(e) {
-      if (e.data === YT.PlayerState.ENDED) {
-        next();
-      }
-    }
-
-    function onPlayerError(e) {
-      console.warn('YouTube error', e?.data);
-      showMsg('Трек пропущен (ошибка воспроизведения).');
-      next();
-    }
-
-    function currentId() {
-      return extractYouTubeId(playlist[idx].url);
-    }
+    function onPlayerStateChange(e) { if (e.data === YT.PlayerState.ENDED) next(); }
+    function onPlayerError(e) { console.warn('YouTube error', e?.data); showMsg('Трек пропущен (ошибка воспроизведения).'); next(); }
+    function currentId() { return extractYouTubeId(playlist[idx].url); }
 
     function playIndex(i) {
       if (!player || !playlist.length) return;
@@ -245,37 +227,18 @@
       if (!vid) { next(); return; }
       player.loadVideoById({ videoId: vid, startSeconds: 0, suggestedQuality: 'small' });
       player.playVideo();
-
       $('#nowplaying').style.display = 'flex';
       $('#nowplaying-text').textContent = `ИГРАЕТ: ${playlist[idx].label}`;
     }
 
-    function next() {
-      if (!playlist.length) return;
-      if (idx < playlist.length - 1) {
-        playIndex(idx + 1);
-      } else if (loop) {
-        shuffle(playlist);
-        playIndex(0);
-      } else {
-        showMsg('Конец плейлиста.');
-      }
-    }
-
+    function next() { if (!playlist.length) return; if (idx < playlist.length - 1) playIndex(idx + 1); else if (loop) { shuffle(playlist); playIndex(0); } else showMsg('Конец плейлиста.'); }
     function prev() { playIndex(idx - 1); }
 
     async function boot() {
       try {
         playlist = await loadLinksFromGitHub(repoUser, repoName, linksPath);
-        if (!playlist.length) {
-          showMsg('В корне нет валидных ссылок.');
-          return;
-        }
-      } catch (e) {
-        console.error(e);
-        showMsg('Не удалось загрузить список ссылок из GitHub.');
-        return;
-      }
+        if (!playlist.length) { showMsg('В корне нет валидных ссылок.'); return; }
+      } catch (e) { console.error(e); showMsg('Не удалось загрузить список ссылок из GitHub.'); return; }
 
       const ticker = $('#ticker-content');
       ticker.innerHTML = '';
@@ -288,15 +251,7 @@
 
       window.addEventListener('keydown', (ev) => {
         if (!player) return;
-        if (ev.code === 'Space') {
-          ev.preventDefault();
-          const st = player.getPlayerState();
-          if (st === YT.PlayerState.PLAYING) player.pauseVideo(); else player.playVideo();
-        } else if (ev.key.toLowerCase() === 'n') {
-          next();
-        } else if (ev.key.toLowerCase() === 'p') {
-          prev();
-        }
+        if (ev.code === 'Space') { ev.preventDefault(); const st = player.getPlayerState(); if (st === YT.PlayerState.PLAYING) player.pauseVideo(); else player.playVideo(); }
       });
     }
 
