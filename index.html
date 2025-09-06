@@ -9,7 +9,7 @@
     html, body {
       margin: 0;
       height: 100%;
-      background: #222; /* темно-серый фон */
+      background: #222;
       color: silver;
       font-family: Arial, sans-serif;
       text-transform: uppercase;
@@ -79,9 +79,9 @@
       bottom: 32px;
       left: 16px;
       font-size: 20px;
-      display: flex;
+      display: none;
       align-items: center;
-      gap: 8px;
+      gap: 12px;
     }
     .dot {
       width: 14px;
@@ -94,6 +94,20 @@
       0%, 100% { opacity: 1; }
       50% { opacity: 0; }
     }
+    .ctrl-btn {
+      border: none;
+      background: #333;
+      color: silver;
+      width: 36px;
+      height: 36px;
+      border-radius: 50%;
+      font-size: 18px;
+      cursor: pointer;
+      transition: background .2s ease;
+      display: grid;
+      place-items: center;
+    }
+    .ctrl-btn:hover { background: #555; }
   </style>
 </head>
 <body>
@@ -104,9 +118,11 @@
   <div id="player-wrapper"><div id="player"></div></div>
   <div id="msg"></div>
 
-  <div id="nowplaying" style="display:none;">
+  <div id="nowplaying">
     <div class="dot"></div>
     <div id="nowplaying-text">ИГРАЕТ:</div>
+    <button class="ctrl-btn" id="prev">⏮</button>
+    <button class="ctrl-btn" id="next">⏭</button>
   </div>
 
   <div id="ticker"><div id="ticker-content"></div></div>
@@ -155,21 +171,7 @@
       const text = await fetch(url, {cache: 'no-store'}).then(r => r.text());
 
       let label = fileMeta.name.replace(/\.webloc$|\.url$|\.txt$/i, '');
-
-      // убираем слово youtube
-      label = label.replace(/youtube/gi, '');
-
-      // убираем содержимое в скобках (нормальные случаи)
-      label = label.replace(/\([^)]*\)/g, '');
-
-      // убираем одиночные или "прилипшие" скобки
-      label = label.replace(/[()]/g, '');
-
-      // убираем дефисы и знаки препинания
-      label = label.replace(/[-.,:;!?]/g, ' ');
-
-      // схлопываем пробелы
-      label = label.replace(/\s+/g, ' ').trim();
+      label = label.replace(/youtube/gi, '').replace(/\([^)]*\)/g, '').replace(/[()]/g, '').replace(/[-.,:;!?]/g, ' ').replace(/\s+/g, ' ').trim();
 
       if (name.endsWith('.txt')) return { url: text.split(/\r?\n/)[0].trim(), label };
       if (name.endsWith('.url')) {
@@ -211,13 +213,12 @@
       player = new YT.Player('player', {
         height: '1', width: '1',
         playerVars: { autoplay: 0, controls: 0, modestbranding: 1, rel: 0, playsinline: 1, fs: 0, disablekb: 1 },
-        events: { onReady: onPlayerReady, onStateChange: onPlayerStateChange, onError: onPlayerError }
+        events: { onStateChange: onPlayerStateChange, onError: onPlayerError }
       });
     }
 
-    function onPlayerReady() {}
     function onPlayerStateChange(e) { if (e.data === YT.PlayerState.ENDED) next(); }
-    function onPlayerError(e) { console.warn('YouTube error', e?.data); showMsg('Трек пропущен (ошибка воспроизведения).'); next(); }
+    function onPlayerError(e) { console.warn('YouTube error', e?.data); showMsg('Трек пропущен.'); next(); }
     function currentId() { return extractYouTubeId(playlist[idx].url); }
 
     function playIndex(i) {
@@ -237,29 +238,31 @@
     async function boot() {
       try {
         playlist = await loadLinksFromGitHub(repoUser, repoName, linksPath);
-        if (!playlist.length) { showMsg('В корне нет валидных ссылок.'); return; }
-      } catch (e) { console.error(e); showMsg('Не удалось загрузить список ссылок из GitHub.'); return; }
+        if (!playlist.length) { showMsg('Нет ссылок.'); $('#start').style.display = 'none'; return; }
+      } catch (e) { console.error(e); showMsg('Ошибка загрузки.'); $('#start').style.display = 'none'; return; }
 
       const ticker = $('#ticker-content');
       ticker.innerHTML = '';
-      for (let i=0; i<playlist.length; i++) {
+      playlist.forEach((item, i) => {
         const span = document.createElement('span');
-        span.textContent = playlist[i].label;
+        span.textContent = item.label;
         span.addEventListener('click', ()=> playIndex(i));
         ticker.appendChild(span);
-      }
+      });
 
       window.addEventListener('keydown', (ev) => {
         if (!player) return;
-        if (ev.code === 'Space') { ev.preventDefault(); const st = player.getPlayerState(); if (st === YT.PlayerState.PLAYING) player.pauseVideo(); else player.playVideo(); }
+        if (ev.code === 'Space') {
+          ev.preventDefault();
+          const st = player.getPlayerState();
+          if (st === YT.PlayerState.PLAYING) player.pauseVideo(); else player.playVideo();
+        }
       });
-    }
 
-    $('#start').addEventListener('click', () => {
-      $('#gate').style.display = 'none';
-      if (!playlist.length) { showMsg('Плейлист пуст.'); return; }
-      playIndex(0);
-    });
+      $('#start').addEventListener('click', () => { $('#gate').style.display = 'none'; playIndex(0); });
+      $('#prev').addEventListener('click', prev);
+      $('#next').addEventListener('click', next);
+    }
 
     (function injectYT() {
       const tag = document.createElement('script');
