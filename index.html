@@ -21,6 +21,7 @@
     .start-btn {
       border: 1px solid #333;
       background: #0a0a0a;
+      color: #fff; /* делаем текст белым */
       padding: 16px 28px;
       border-radius: 999px;
       font-size: 18px;
@@ -31,15 +32,59 @@
     .start-btn:hover { background: #111; border-color: #444; transform: scale(1.02); }
     .start-btn:active { transform: scale(0.98); }
 
-    #player-wrapper {
-  width: 0;
-  height: 0;
-  overflow: hidden;
-}
+    #player-wrapper { width: 0; height: 0; overflow: hidden; }
 
+    #msg { position: fixed; left: 50%; bottom: 64px; transform: translateX(-50%); font-size: 14px; opacity: 0.8; display: none; }
 
-    #player-wrapper { position: fixed; left: -99999px; top: -99999px; width: 1px; height: 1px; overflow: hidden; }
-    #msg { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); font-size: 14px; opacity: 0.8; display: none; }
+    #ticker {
+      position: fixed;
+      bottom: 0;
+      width: 100%;
+      background: #000;
+      white-space: nowrap;
+      overflow: hidden;
+      border-top: 1px solid #222;
+      font-size: 14px;
+      line-height: 28px;
+      height: 28px;
+    }
+    #ticker span {
+      display: inline-block;
+      padding-right: 2rem;
+      color: #0ff;
+      cursor: pointer;
+    }
+    #ticker-content {
+      display: inline-block;
+      padding-left: 100%;
+      animation: scroll-left 20s linear infinite;
+    }
+    @keyframes scroll-left {
+      0% { transform: translateX(0); }
+      100% { transform: translateX(-100%); }
+    }
+
+    #nowplaying {
+      position: fixed;
+      bottom: 32px;
+      left: 50%;
+      transform: translateX(-50%);
+      font-size: 14px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: red;
+      animation: blink 1s infinite;
+    }
+    @keyframes blink {
+      0%, 50% { opacity: 1; }
+      25%, 75% { opacity: 0; }
+    }
   </style>
 </head>
 <body>
@@ -49,6 +94,13 @@
 
   <div id="player-wrapper"><div id="player"></div></div>
   <div id="msg"></div>
+
+  <div id="nowplaying" style="display:none;">
+    <div class="dot"></div>
+    <div id="nowplaying-text">Now playing:</div>
+  </div>
+
+  <div id="ticker"><div id="ticker-content"></div></div>
 
   <script>
     const repoUser = 'indexmod';
@@ -91,17 +143,17 @@
       const text = await fetch(url, {cache: 'no-store'}).then(r => r.text());
 
       if (name.endsWith('.txt')) {
-        return text.split(/\r?\n/)[0].trim();
+        return { url: text.split(/\r?\n/)[0].trim(), label: fileMeta.name };
       }
       if (name.endsWith('.url')) {
         const m = text.match(/^URL=(.+)$/mi);
-        return m ? m[1].trim() : '';
+        return { url: m ? m[1].trim() : '', label: fileMeta.name };
       }
       if (name.endsWith('.webloc')) {
         const m = text.match(/<key>URL<\/key>\s*<string>([^<]+)<\/string>/i) || text.match(/<string>(https?:\/\/[^<]+)<\/string>/i);
-        return m ? m[1].trim() : '';
+        return { url: m ? m[1].trim() : '', label: fileMeta.name.replace(/\.webloc$/i, '') };
       }
-      return text.trim();
+      return { url: text.trim(), label: fileMeta.name };
     }
 
     async function loadLinksFromGitHub(user, repo, path) {
@@ -113,8 +165,8 @@
       const urls = [];
       for (const f of files) {
         try {
-          const link = await parseLinkFile(f);
-          if (link && extractYouTubeId(link)) urls.push(link);
+          const parsed = await parseLinkFile(f);
+          if (parsed.url && extractYouTubeId(parsed.url)) urls.push(parsed);
         } catch (e) {
           console.warn('Не удалось прочитать', f.name, e);
         }
@@ -162,8 +214,7 @@
     }
 
     function currentId() {
-      const url = playlist[idx];
-      return extractYouTubeId(url);
+      return extractYouTubeId(playlist[idx].url);
     }
 
     function playIndex(i) {
@@ -172,7 +223,11 @@
       const vid = currentId();
       if (!vid) { next(); return; }
       player.loadVideoById({ videoId: vid, startSeconds: 0, suggestedQuality: 'small' });
-      player.playVideo(); // запускаем сразу
+      player.playVideo();
+
+      // обновляем надпись Now playing
+      $('#nowplaying').style.display = 'flex';
+      $('#nowplaying-text').textContent = `Now playing: ${playlist[idx].label}`;
     }
 
     function next() {
@@ -203,6 +258,16 @@
       }
 
       $('#start').textContent = `▶︎ Воспроизвести ${playlist.length} трек(ов)`;
+
+      // заполняем бегущую строку
+      const ticker = $('#ticker-content');
+      ticker.innerHTML = '';
+      for (let i=0; i<playlist.length; i++) {
+        const span = document.createElement('span');
+        span.textContent = playlist[i].label;
+        span.addEventListener('click', ()=> playIndex(i));
+        ticker.appendChild(span);
+      }
 
       window.addEventListener('keydown', (ev) => {
         if (!player) return;
