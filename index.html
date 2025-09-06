@@ -31,6 +31,13 @@
     .start-btn:hover { background: #111; border-color: #444; transform: scale(1.02); }
     .start-btn:active { transform: scale(0.98); }
 
+    #player-wrapper {
+  width: 0;
+  height: 0;
+  overflow: hidden;
+}
+
+
     #player-wrapper { position: fixed; left: -99999px; top: -99999px; width: 1px; height: 1px; overflow: hidden; }
     #msg { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); font-size: 14px; opacity: 0.8; display: none; }
   </style>
@@ -165,6 +172,7 @@
       const vid = currentId();
       if (!vid) { next(); return; }
       player.loadVideoById({ videoId: vid, startSeconds: 0, suggestedQuality: 'small' });
+      player.playVideo(); // запускаем сразу
     }
 
     function next() {
