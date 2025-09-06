@@ -3,16 +3,16 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Audio-Only YouTube (Black Screen)</title>
+  <title>Плейлист</title>
   <style>
     html, body {
       margin: 0;
       height: 100%;
-      background: #000;
+      background: #222; /* темно-серый фон */
       color: silver;
       font-family: Arial, sans-serif;
       text-transform: uppercase;
-      font-size: 50px;
+      font-size: 30px;
     }
     .center {
       position: fixed;
@@ -22,36 +22,36 @@
     }
     .start-btn {
       border: none;
-      background: #0a0a0a;
+      background: #333;
       color: silver;
       padding: 16px 28px;
       border-radius: 999px;
-      font-size: 50px;
+      font-size: 30px;
       cursor: pointer;
       transition: transform .2s ease, background .2s ease;
       user-select: none;
     }
-    .start-btn:hover { background: #111; transform: scale(1.05); }
+    .start-btn:hover { background: #444; transform: scale(1.05); }
     .start-btn:active { transform: scale(0.95); }
 
     #player-wrapper { width: 0; height: 0; overflow: hidden; }
 
-    #msg { position: fixed; left: 50%; bottom: 64px; transform: translateX(-50%); font-size: 24px; opacity: 0.8; display: none; }
+    #msg { position: fixed; left: 50%; bottom: 64px; transform: translateX(-50%); font-size: 20px; opacity: 0.8; display: none; }
 
     #ticker {
       position: fixed;
       top: 0;
       width: 100%;
-      background: #000;
+      background: #222;
       white-space: nowrap;
       overflow: hidden;
-      border-bottom: 1px solid #222;
-      line-height: 60px;
-      height: 60px;
+      border-bottom: 1px solid #444;
+      line-height: 50px;
+      height: 50px;
     }
     #ticker span {
       display: inline-block;
-      padding-right: 4rem;
+      padding-right: 3rem;
       color: silver;
       cursor: pointer;
     }
@@ -69,14 +69,14 @@
       position: fixed;
       bottom: 32px;
       left: 16px;
-      font-size: 24px;
+      font-size: 20px;
       display: flex;
       align-items: center;
-      gap: 10px;
+      gap: 8px;
     }
     .dot {
-      width: 16px;
-      height: 16px;
+      width: 14px;
+      height: 14px;
       border-radius: 50%;
       background: white;
       animation: fadeblink 2s infinite;
@@ -87,10 +87,10 @@
     }
 
     @media (max-width: 600px) {
-      html, body { font-size: 28px; }
-      .start-btn { font-size: 36px; padding: 12px 20px; }
-      #nowplaying { font-size: 18px; }
-      #ticker { line-height: 40px; height: 40px; }
+      html, body { font-size: 22px; }
+      .start-btn { font-size: 24px; padding: 12px 20px; }
+      #nowplaying { font-size: 16px; }
+      #ticker { line-height: 36px; height: 36px; }
     }
   </style>
 </head>
@@ -149,18 +149,21 @@
       const name = fileMeta.name.toLowerCase();
       const text = await fetch(url, {cache: 'no-store'}).then(r => r.text());
 
+      let label = fileMeta.name.replace(/\.webloc$|\.url$|\.txt$/i, '');
+      label = label.replace(/youtube/gi, ''); // убираем слово youtube
+
       if (name.endsWith('.txt')) {
-        return { url: text.split(/\r?\n/)[0].trim(), label: fileMeta.name };
+        return { url: text.split(/\r?\n/)[0].trim(), label };
       }
       if (name.endsWith('.url')) {
         const m = text.match(/^URL=(.+)$/mi);
-        return { url: m ? m[1].trim() : '', label: fileMeta.name };
+        return { url: m ? m[1].trim() : '', label };
       }
       if (name.endsWith('.webloc')) {
         const m = text.match(/<key>URL<\/key>\s*<string>([^<]+)<\/string>/i) || text.match(/<string>(https?:\/\/[^<]+)<\/string>/i);
-        return { url: m ? m[1].trim() : '', label: fileMeta.name.replace(/\.webloc$/i, '') };
+        return { url: m ? m[1].trim() : '', label };
       }
-      return { url: text.trim(), label: fileMeta.name };
+      return { url: text.trim(), label };
     }
 
     async function loadLinksFromGitHub(user, repo, path) {
@@ -254,7 +257,7 @@
       try {
         playlist = await loadLinksFromGitHub(repoUser, repoName, linksPath);
         if (!playlist.length) {
-          showMsg('В корне нет валидных ссылок на YouTube.');
+          showMsg('В корне нет валидных ссылок.');
           return;
         }
       } catch (e) {
@@ -263,7 +266,6 @@
         return;
       }
 
-      // бегущая строка
       const ticker = $('#ticker-content');
       ticker.innerHTML = '';
       for (let i=0; i<playlist.length; i++) {
