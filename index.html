@@ -69,7 +69,7 @@
       position: fixed;
       bottom: 32px;
       left: 16px;
-      font-size: 20px;
+      font-size: 30px; /* увеличено */
       display: flex;
       align-items: center;
       gap: 8px;
@@ -89,7 +89,7 @@
     @media (max-width: 600px) {
       html, body { font-size: 22px; }
       .start-btn { font-size: 24px; padding: 12px 20px; }
-      #nowplaying { font-size: 16px; }
+      #nowplaying { font-size: 22px; }
       #ticker { line-height: 36px; height: 36px; }
     }
   </style>
@@ -104,7 +104,7 @@
 
   <div id="nowplaying" style="display:none;">
     <div class="dot"></div>
-    <div id="nowplaying-text">СЕЙЧАС ИГРАЕТ:</div>
+    <div id="nowplaying-text">ИГРАЕТ:</div>
   </div>
 
   <div id="ticker"><div id="ticker-content"></div></div>
@@ -151,6 +151,7 @@
 
       let label = fileMeta.name.replace(/\.webloc$|\.url$|\.txt$/i, '');
       label = label.replace(/youtube/gi, ''); // убираем слово youtube
+      label = label.replace(/^-+/, ''); // убираем дефис перед названием
 
       if (name.endsWith('.txt')) {
         return { url: text.split(/\r?\n/)[0].trim(), label };
@@ -236,7 +237,7 @@
       player.playVideo();
 
       $('#nowplaying').style.display = 'flex';
-      $('#nowplaying-text').textContent = `СЕЙЧАС ИГРАЕТ: ${playlist[idx].label}`;
+      $('#nowplaying-text').textContent = `ИГРАЕТ: ${playlist[idx].label}`;
     }
 
     function next() {
@@ -271,7 +272,7 @@
       for (let i=0; i<playlist.length; i++) {
         const span = document.createElement('span');
         span.textContent = playlist[i].label;
-        span.addEventListener('click', ()=> playIndex(i));
+        span.addEventListener('click', ()=> next()); // клик по топику = следующий трек
         ticker.appendChild(span);
       }
 
@@ -279,12 +280,7 @@
         if (!player) return;
         if (ev.code === 'Space') {
           ev.preventDefault();
-          const st = player.getPlayerState();
-          if (st === YT.PlayerState.PLAYING) player.pauseVideo(); else player.playVideo();
-        } else if (ev.key.toLowerCase() === 'n') {
-          next();
-        } else if (ev.key.toLowerCase() === 'p') {
-          prev();
+          next(); // спейсбар = следующий трек
         }
       });
     }
