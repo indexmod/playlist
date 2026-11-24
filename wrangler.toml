@@ -1,0 +1,8 @@
+name = "indexmod-radio-schedule"
+main = "cloudflare-worker.js"
+compatibility_date = "2026-11-24"
+
+# Create a KV namespace, then set its id below before deployment.
+[[kv_namespaces]]
+binding = "SCHEDULES"
+id = "REPLACE_WITH_KV_NAMESPACE_ID"
