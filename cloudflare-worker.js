@@ -15,24 +15,23 @@ export class RadioRoom {
       for(const slot of Object.values(schedule.slots)) delete slot.ownerHash;
       return reply(schedule);
     }
-    if(method==='PUT'&&u.pathname==='/'){if(!this.env.RADIO_WRITE_KEY||request.headers.get('X-Radio-Key')!==this.env.RADIO_WRITE_KEY)return reply({error:'forbidden'},403);let data=await request.json();if(!data||data.version!==2||!data.settings||!data.slots)return reply({error:'invalid schedule'},400);await this.state.storage.transaction(async tx=>{let current=await tx.get('schedule');current.settings=data.settings;await tx.put('schedule',current)});return reply({ok:true});}
+    if(method==='PUT'&&u.pathname==='/'){if(!isAdmin(request,this.env))return reply({error:'forbidden'},403);let data=await request.json();if(!data||data.version!==2||!data.settings||!data.slots)return reply({error:'invalid schedule'},400);await this.state.storage.transaction(async tx=>{let current=await tx.get('schedule');current.settings=data.settings;await tx.put('schedule',current)});return reply({ok:true});}
     const match=u.pathname.match(/^\/(slots|chat)\/(\d+)$/);if(!match||!validSlot(match[2]))return reply({error:'not found'},404);let key=match[2];
     if(match[1]==='chat'&&method==='GET')return reply(await this.state.storage.get('chat:'+key)||[]);
     if(match[1]==='chat'&&method==='POST'){let body=await request.json(),text=String(body.text||'').trim();if(!text||text.length>500)return reply({error:'invalid message'},400);await this.state.storage.transaction(async tx=>{let rows=await tx.get('chat:'+key)||[];rows.push({text,time:Date.now()});await tx.put('chat:'+key,rows.slice(-100));});return reply({ok:true});}
     if(match[1]==='slots'&&method==='DELETE'){
       const body=await request.json().catch(()=>null);
       if(!body||typeof body.revision!=='string')return reply({error:'invalid data'},400);
-      const admin=isAdmin(request,this.env);
-      const ownerHash=validToken(body.token)?await digest(body.token):null;
-      if(!admin&&!ownerHash)return reply({error:'forbidden'},403);
+      if(!validToken(body.token))return reply({error:'forbidden'},403);
+      const ownerHash=await digest(body.token);
       const result=await this.state.storage.transaction(async tx=>{
         const schedule=await tx.get('schedule');
         const slot=schedule.slots[key];
-        if(!slot)return body.revision?409:200;
-        if(body.revision!==(slot.revision||''))return 409;
-        if(!admin&&slot.ownerHash!==ownerHash)return 403;
+        if(body.revision!==(slot?.revision||''))return 409;
+        if(slot?.ownerHash!==ownerHash)return 403;
         delete schedule.slots[key];
         await tx.put('schedule',schedule);
+        await tx.delete('chat:'+key);
         return 200;
       });
       if(result===409)return reply({error:'conflict'},409);
@@ -41,8 +40,7 @@ export class RadioRoom {
     }
     if(match[1]==='slots'&&method==='PUT'){
       const body=await request.json().catch(()=>null);
-      const admin=isAdmin(request,this.env);
-      if(!body?.slot||typeof body.revision!=='string'||(!admin&&!validToken(body.token))){
+      if(!body?.slot||typeof body.revision!=='string'||!validToken(body.token)){
         return reply({error:'invalid data'},400);
       }
       const program=body.slot;
@@ -53,26 +51,21 @@ export class RadioRoom {
       if(!['https:','http:'].includes(url.protocol)||author.length>80||title.length>120){
         return reply({error:'invalid data'},400);
       }
-      const tokenHash=admin?null:await digest(body.token);
+      const tokenHash=await digest(body.token);
       const result=await this.state.storage.transaction(async tx=>{
         const schedule=await tx.get('schedule');
         const previous=schedule.slots[key];
         if(body.revision!==(previous?.revision||''))return {error:'conflict'};
-        if(!admin&&previous?.lockUntil>Date.now()&&previous.ownerHash!==tokenHash){
+        if(previous?.lockUntil>Date.now()&&previous.ownerHash!==tokenHash){
           return {error:'locked'};
         }
         const slot={
           type:'program',url:url.href,userTitle:title,author,
           originalTitle:String(program.originalTitle??'').slice(0,300),
-          start:Math.max(0,Number(program.start)||0),revision:crypto.randomUUID()
+          start:Math.max(0,Number(program.start)||0),revision:crypto.randomUUID(),
+          ownerHash:tokenHash,
+          lockUntil:nextEnd(Number(key)-48,schedule.settings.timezone||'Europe/Moscow')
         };
-        if(!admin){
-          slot.ownerHash=tokenHash;
-          slot.lockUntil=nextEnd(Number(key)-48,schedule.settings.timezone||'Europe/Moscow');
-        }else if(previous?.ownerHash){
-          slot.ownerHash=previous.ownerHash;
-          slot.lockUntil=previous.lockUntil;
-        }
         schedule.slots[key]=slot;
         await tx.put('schedule',schedule);
         return {ok:true};

@@ -18,30 +18,33 @@ function draw(){
     cell.innerHTML=`<span class="slot-time">${String(hour).padStart(2,'0')}:00</span>
       <strong class="slot-title"></strong><span class="slot-author"></span>
       <div class="chat-area"><div class="chat-messages"></div>
-      <textarea class="slot-chat" rows="2" maxlength="500" enterkeyhint="send"
-        aria-label="Комментарий. Enter для отправки"></textarea></div>`;
+      <textarea class="slot-chat" rows="2" maxlength="500" enterkeyhint="enter"
+        aria-label="Комментарий. Сохраняется при выходе из поля"></textarea></div>`;
     cell.querySelector('.slot-title').textContent=name(program);
     const status=program.lockUntil>Date.now()?'● Занято':'○ Свободно';
     cell.querySelector('.slot-author').textContent=program.author?`${status} · ${program.author}`:status;
     const chat=cell.querySelector('.slot-chat'), messages=cell.querySelector('.chat-messages');
     chat.placeholder=program.author?'Написать: '+program.author:'Написать комментарий';
     cell.onclick=event=>{if(!event.target.closest('.chat-area'))edit(key)};
-    let sending=false;
-    chat.onkeydown=async event=>{
-      if(event.key!=='Enter'||event.shiftKey||event.isComposing)return;
-      event.preventDefault();
+    let pending=Promise.resolve();
+    chat.onblur=()=>{
       const draft=chat.value, message=draft.trim();
-      if(!message||sending||event.repeat)return;
-      sending=true;
-      try{
-        const response=await fetch(API+'chat/'+key,{
-          method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:message})
-        });
-        if(!response.ok)throw Error();
-        if(chat.value===draft)chat.value='';
-        await loadChat(key,messages);
-      }catch{note('Не удалось отправить сообщение.',true)}
-      finally{sending=false}
+      if(!message)return;
+      chat.value='';
+      pending=pending.then(async()=>{
+        try{
+          const response=await fetch(API+'chat/'+key,{
+            method:'POST',headers:{'Content-Type':'application/json'},
+            body:JSON.stringify({text:message}),keepalive:true
+          });
+          if(!response.ok)throw Error();
+          await loadChat(key,messages);
+        }catch{
+          chat.value=chat.value?draft+'\n'+chat.value:draft;
+          note('Комментарий не сохранён. Вернитесь в поле и попробуйте ещё раз.',true);
+        }
+      });
+      return pending;
     };
     root.append(cell);
     loadChat(key,messages);
@@ -75,7 +78,6 @@ async function updateSlot(method, slot){
   if(slotRequestPending)return;
   const key=selected, revision=editingRevision;
   const clear=method==='DELETE', headers={'Content-Type':'application/json'};
-  if(writeKey)headers['X-Radio-Key']=writeKey;
   slotRequestPending=true;
   editorError();
   try{
@@ -83,7 +85,7 @@ async function updateSlot(method, slot){
       method,headers,body:JSON.stringify({token:visitorToken(),revision,slot})
     });
     if(response.status===403){
-      editorError('Очистить ячейку может автор из своего браузера или администратор с ключом Cloudflare.');
+      editorError('Очистить карточку можно из браузера, в котором её сохранили.');
       return;
     }
     if(response.status===409){
