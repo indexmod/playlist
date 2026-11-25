@@ -39,8 +39,45 @@ export class RadioRoom {
       if(result===403)return reply({error:'forbidden'},403);
       return reply({ok:true});
     }
-    if(match[1]==='slots'&&method==='PUT'){let body=await request.json();if(typeof body.token!=='string'||body.token.length<32||body.token.length>200||!body.slot)return reply({error:'invalid data'},400);let tokenHash=await digest(body.token),s=body.slot;let url;try{url=new URL(s.url)}catch{return reply({error:'invalid url'},400)}if(!['https:','http:'].includes(url.protocol)||!String(s.author||'').trim()||String(s.author).length>80||String(s.userTitle||'').length>120)return reply({error:'invalid data'},400);
-      let result=await this.state.storage.transaction(async tx=>{let data=await tx.get('schedule'),old=data.slots[key],rev=old&&old.revision||'';if((body.revision||'')!==rev)return {error:'conflict'};if(old&&old.lockUntil>Date.now()&&old.ownerHash!==tokenHash)return {error:'locked'};let slot={type:'program',url:url.href,userTitle:String(s.userTitle||'').trim(),originalTitle:String(s.originalTitle||'').slice(0,300),author:String(s.author).trim(),start:Math.max(0,Number(s.start)||0),ownerHash:tokenHash,lockUntil:nextEnd(Number(key)-48,data.settings.timezone||'Europe/Moscow'),revision:crypto.randomUUID()};data.slots[key]=slot;await tx.put('schedule',data);return {ok:true};});return reply(result,result.error?409:200);
+    if(match[1]==='slots'&&method==='PUT'){
+      const body=await request.json().catch(()=>null);
+      const admin=isAdmin(request,this.env);
+      if(!body?.slot||typeof body.revision!=='string'||(!admin&&!validToken(body.token))){
+        return reply({error:'invalid data'},400);
+      }
+      const program=body.slot;
+      const author=String(program.author??'').trim();
+      const title=String(program.userTitle??'').trim();
+      let url;
+      try{url=new URL(program.url)}catch{return reply({error:'invalid url'},400)}
+      if(!['https:','http:'].includes(url.protocol)||author.length>80||title.length>120){
+        return reply({error:'invalid data'},400);
+      }
+      const tokenHash=admin?null:await digest(body.token);
+      const result=await this.state.storage.transaction(async tx=>{
+        const schedule=await tx.get('schedule');
+        const previous=schedule.slots[key];
+        if(body.revision!==(previous?.revision||''))return {error:'conflict'};
+        if(!admin&&previous?.lockUntil>Date.now()&&previous.ownerHash!==tokenHash){
+          return {error:'locked'};
+        }
+        const slot={
+          type:'program',url:url.href,userTitle:title,author,
+          originalTitle:String(program.originalTitle??'').slice(0,300),
+          start:Math.max(0,Number(program.start)||0),revision:crypto.randomUUID()
+        };
+        if(!admin){
+          slot.ownerHash=tokenHash;
+          slot.lockUntil=nextEnd(Number(key)-48,schedule.settings.timezone||'Europe/Moscow');
+        }else if(previous?.ownerHash){
+          slot.ownerHash=previous.ownerHash;
+          slot.lockUntil=previous.lockUntil;
+        }
+        schedule.slots[key]=slot;
+        await tx.put('schedule',schedule);
+        return {ok:true};
+      });
+      return reply(result,result.error?409:200);
     }return reply({error:'method not allowed'},405);
   }
 }

@@ -7,11 +7,43 @@ function now(date=new Date()){let zone=state.settings.timezone;try{new Intl.Date
 function fallback(){return{type:'program',url:state.settings.defaultUrl,originalTitle:state.settings.defaultTitle,userTitle:'',start:0,inherited:true}}function get(d,h){return Object.assign({},state.slots[k(d,h)]||fallback())}function name(x){return x.userTitle||x.originalTitle||''}function duration(x){return Math.max(1,Math.min(300,+x.idDuration||+state.settings.idDuration||30))}
 function frame(){let p=now(),x=get(p.day,p.hour),s=p.min*60+p.sec,id=duration(x);return s>=3600-id?{kind:'id',url:state.settings.idUrl,start:s-(3600-id),key:`id:${k(p.day,p.hour)}`,p}:{kind:'program',url:x.url,start:(+x.start||0)+s,key:`program:${k(p.day,p.hour)}:${x.url}`,p,x}}
 function isYT(u=''){return/(youtu\.be|youtube\.com)/i.test(u)}function vid(u=''){try{let x=new URL(u);return x.searchParams.get('v')||x.pathname.split('/').filter(Boolean).pop()}catch{return''}}
-function draw(){let p=now(),root=$('#schedule');root.textContent='';for(let h=0;h<24;h++){let key=k(p.day,h),x=get(p.day,h),explicit=!!state.slots[key],e=document.createElement('article');e.className='slot'+(h===p.hour?' current':'');e.dataset.key=key;e.innerHTML=`<span class="slot-time">${String(h).padStart(2,'0')}:00</span><strong class="slot-title"></strong><span class="slot-author"></span><div class="chat-area"><div class="chat-messages"></div><textarea class="slot-chat" rows="2" maxlength="500"></textarea><button class="chat-send" type="button">Отправить</button></div>`;e.querySelector('.slot-title').textContent=name(x);e.querySelector('.slot-author').textContent=x.lockUntil>Date.now()?'● '+(x.author||'слушатель'):'○ Свободно';let chat=e.querySelector('.slot-chat'),messages=e.querySelector('.chat-messages');chat.placeholder=x.author?'Написать: '+x.author:'Написать сообщение';e.onclick=z=>{if(!z.target.closest('.chat-area'))edit(key)};e.querySelector('.chat-area').onclick=z=>z.stopPropagation();e.querySelector('.chat-send').onclick=async()=>{let text=chat.value.trim();if(!text)return;try{let r=await fetch(API+'chat/'+key,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text})});if(!r.ok)throw Error();chat.value='';await loadChat(key,messages)}catch{note('Не удалось отправить сообщение.',true)}};root.append(e);loadChat(key,messages)}}
+function draw(){
+  const time=now(), root=$('#schedule');
+  root.textContent='';
+  for(let hour=0;hour<24;hour++){
+    const key=k(time.day,hour), program=get(time.day,hour);
+    const cell=document.createElement('article');
+    cell.className=hour===time.hour?'slot current':'slot';
+    cell.dataset.key=key;
+    cell.innerHTML=`<span class="slot-time">${String(hour).padStart(2,'0')}:00</span>
+      <strong class="slot-title"></strong><span class="slot-author"></span>
+      <div class="chat-area"><div class="chat-messages"></div>
+      <textarea class="slot-chat" rows="2" maxlength="500"></textarea>
+      <button class="chat-send" type="button">Отправить</button></div>`;
+    cell.querySelector('.slot-title').textContent=name(program);
+    const status=program.lockUntil>Date.now()?'● Занято':'○ Свободно';
+    cell.querySelector('.slot-author').textContent=program.author?`${status} · ${program.author}`:status;
+    const chat=cell.querySelector('.slot-chat'), messages=cell.querySelector('.chat-messages');
+    chat.placeholder=program.author?'Написать: '+program.author:'Написать комментарий';
+    cell.onclick=event=>{if(!event.target.closest('.chat-area'))edit(key)};
+    cell.querySelector('.chat-send').onclick=async()=>{
+      const message=chat.value.trim();
+      if(!message)return;
+      try{
+        const response=await fetch(API+'chat/'+key,{
+          method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:message})
+        });
+        if(!response.ok)throw Error();
+        chat.value='';
+        await loadChat(key,messages);
+      }catch{note('Не удалось отправить сообщение.',true)}
+    };
+    root.append(cell);
+    loadChat(key,messages);
+  }
+}
 async function loadChat(key,el){try{let r=await fetch(API+'chat/'+key,{cache:'no-store'});if(!r.ok)return;let rows=await r.json();el.textContent='';rows.forEach(row=>{let item=document.createElement('p');item.textContent=row.text;el.append(item)})}catch{}}
-async function drop(e){e.preventDefault();e.currentTarget.classList.remove('drag-over');let target=e.currentTarget.dataset.key,from=e.dataTransfer.getData('application/x-radio-slot');if(from){if(from!==target){state.slots[target]=state.slots[from];delete state.slots[from];save();draw();note('Источник перемещён.')}return}let url=e.dataTransfer.getData('text/uri-list')||e.dataTransfer.getData('text/plain');let f=[...e.dataTransfer.files][0];if(f&&/\.(webloc|url)$/i.test(f.name)){let t=await f.text();url=(t.match(/<string>(https?:\/\/[^<]+)/i)||t.match(/^URL=(.+)$/mi)||[])[1]||''}if(!/^https?:\/\//i.test(url)){note('Перетащите ссылку YouTube, .webloc или .url.',true);return}let x={type:'program',url,originalTitle:label(url),userTitle:'',start:0};state.slots[target]=x;save();draw();note('Источник добавлен.');fetchTitle(x);}
-function label(url){try{return new URL(url).hostname.includes('youtube')?'YouTube-клип':new URL(url).pathname.split('/').pop()||'Аудио'}catch{return'Источник'}}async function fetchTitle(x){if(!isYT(x.url))return;try{let r=await fetch('https://www.youtube.com/oembed?url='+encodeURIComponent(x.url)+'&format=json'),j=await r.json();x.originalTitle=j.title||x.originalTitle;save();draw()}catch{}}
-let authorLabel=document.createElement('label');authorLabel.textContent='Автор';let authorInput=document.createElement('input');authorInput.name='author';authorInput.maxLength=80;authorInput.placeholder='Ваше имя или псевдоним';authorLabel.append(authorInput);$('#editor-form').insertBefore(authorLabel,$('#original-title'));
+let authorLabel=document.createElement('label');authorLabel.textContent='Подпись (необязательно)';let authorInput=document.createElement('input');authorInput.name='author';authorInput.maxLength=80;authorInput.placeholder='Имя или псевдоним';authorLabel.append(authorInput);$('#editor-form').insertBefore(authorLabel,$('#original-title'));
 let editingRevision='';
 function editorError(message=''){
   const error=$('#editor-error');
@@ -38,7 +70,7 @@ async function updateSlot(method, slot){
   if(slotRequestPending)return;
   const key=selected, revision=editingRevision;
   const clear=method==='DELETE', headers={'Content-Type':'application/json'};
-  if(clear&&writeKey)headers['X-Radio-Key']=writeKey;
+  if(writeKey)headers['X-Radio-Key']=writeKey;
   slotRequestPending=true;
   editorError();
   try{
@@ -70,9 +102,9 @@ $('#editor-form').onsubmit=e=>{
   const form=e.currentTarget, old=state.slots[selected]||{}, url=form.url.value.trim();
   const slot={
     url,userTitle:form.userTitle.value.trim(),author:form.elements.author.value.trim(),
-    originalTitle:old.url===url?(old.originalTitle||''):'',start:Number(form.start.value)||0
+    originalTitle:(old.url===url&&old.originalTitle)||(isYT(url)?'YouTube':'Аудио'),start:Number(form.start.value)||0
   };
-  if(!slot.url||!slot.author){editorError('Укажите ссылку и имя автора.');return}
+  if(!slot.url){editorError('Укажите ссылку на программу.');return}
   updateSlot('PUT',slot);
 };
 $('#clear-cell').onclick=()=>updateSlot('DELETE');
