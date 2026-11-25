@@ -18,25 +18,30 @@ function draw(){
     cell.innerHTML=`<span class="slot-time">${String(hour).padStart(2,'0')}:00</span>
       <strong class="slot-title"></strong><span class="slot-author"></span>
       <div class="chat-area"><div class="chat-messages"></div>
-      <textarea class="slot-chat" rows="2" maxlength="500"></textarea>
-      <button class="chat-send" type="button">Отправить</button></div>`;
+      <textarea class="slot-chat" rows="2" maxlength="500" enterkeyhint="send"
+        aria-label="Комментарий. Enter для отправки"></textarea></div>`;
     cell.querySelector('.slot-title').textContent=name(program);
     const status=program.lockUntil>Date.now()?'● Занято':'○ Свободно';
     cell.querySelector('.slot-author').textContent=program.author?`${status} · ${program.author}`:status;
     const chat=cell.querySelector('.slot-chat'), messages=cell.querySelector('.chat-messages');
     chat.placeholder=program.author?'Написать: '+program.author:'Написать комментарий';
     cell.onclick=event=>{if(!event.target.closest('.chat-area'))edit(key)};
-    cell.querySelector('.chat-send').onclick=async()=>{
-      const message=chat.value.trim();
-      if(!message)return;
+    let sending=false;
+    chat.onkeydown=async event=>{
+      if(event.key!=='Enter'||event.shiftKey||event.isComposing)return;
+      event.preventDefault();
+      const draft=chat.value, message=draft.trim();
+      if(!message||sending||event.repeat)return;
+      sending=true;
       try{
         const response=await fetch(API+'chat/'+key,{
           method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:message})
         });
         if(!response.ok)throw Error();
-        chat.value='';
+        if(chat.value===draft)chat.value='';
         await loadChat(key,messages);
       }catch{note('Не удалось отправить сообщение.',true)}
+      finally{sending=false}
     };
     root.append(cell);
     loadChat(key,messages);
