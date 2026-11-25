@@ -8,7 +8,11 @@ async function digest(token){let b=await crypto.subtle.digest('SHA-256',new Text
 export class RadioRoom {
   constructor(state,env){this.state=state;this.env=env;this.ready=state.blockConcurrencyWhile(async()=>{let v=await state.storage.get('schedule');if(!v){let raw=await env.SCHEDULES.get('current');let initial=raw?JSON.parse(raw):structuredClone(empty);if(!initial||initial.version!==2||!initial.slots||!initial.settings)throw Error('Invalid existing schedule');await state.storage.put('schedule',initial);}});}
   async fetch(request){await this.ready;let u=new URL(request.url),method=request.method;
-    if(method==='GET'&&u.pathname==='/')return reply(await this.state.storage.get('schedule'));
+    if(method==='GET'&&u.pathname==='/'){
+      const schedule=await this.state.storage.get('schedule');
+      for(const slot of Object.values(schedule.slots)) delete slot.ownerHash;
+      return reply(schedule);
+    }
     if(method==='PUT'&&u.pathname==='/'){if(!this.env.RADIO_WRITE_KEY||request.headers.get('X-Radio-Key')!==this.env.RADIO_WRITE_KEY)return reply({error:'forbidden'},403);let data=await request.json();if(!data||data.version!==2||!data.settings||!data.slots)return reply({error:'invalid schedule'},400);await this.state.storage.transaction(async tx=>{let current=await tx.get('schedule');current.settings=data.settings;await tx.put('schedule',current)});return reply({ok:true});}
     const match=u.pathname.match(/^\/(slots|chat)\/(\d+)$/);if(!match||!validSlot(match[2]))return reply({error:'not found'},404);let key=match[2];
     if(match[1]==='chat'&&method==='GET')return reply(await this.state.storage.get('chat:'+key)||[]);

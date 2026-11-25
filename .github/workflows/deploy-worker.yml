@@ -26,5 +26,5 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
           CLOUDFLARE_KV_NAMESPACE_ID: ${{ vars.CLOUDFLARE_KV_NAMESPACE_ID }}
         run: |
-          node -e "const fs=require('fs');fs.writeFileSync('deploy-wrangler.json',JSON.stringify({name:'playlist',main:'cloudflare-worker.js',compatibility_date:'2026-11-24',kv_namespaces:[{binding:'SCHEDULES',id:process.env.CLOUDFLARE_KV_NAMESPACE_ID}],durable_objects:{bindings:[{name:'RADIO_ROOM',class_name:'RadioRoom'}]},migrations:[{tag:'v1',new_sqlite_classes:['RadioRoom']}]}))"
+          node -e "const fs=require('fs');fs.writeFileSync('deploy-wrangler.json',JSON.stringify({name:'playlist',main:'cloudflare-worker.js',compatibility_date:'2026-05-03',kv_namespaces:[{binding:'SCHEDULES',id:process.env.CLOUDFLARE_KV_NAMESPACE_ID}],durable_objects:{bindings:[{name:'RADIO_ROOM',class_name:'RadioRoom'}]},migrations:[{tag:'v1',new_sqlite_classes:['RadioRoom']}]}))"
           npx --yes wrangler@4.86.0 deploy --config deploy-wrangler.json --keep-vars
