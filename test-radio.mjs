@@ -1,0 +1,18 @@
+import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
+const source=await readFile(new URL('./cloudflare-worker.js',import.meta.url),'utf8');
+const {RadioRoom}=await import('data:text/javascript;base64,'+Buffer.from(source).toString('base64'));
+const store=new Map(),storage={async get(k){return structuredClone(store.get(k))},async put(k,v){store.set(k,structuredClone(v))},async transaction(fn){return fn(this)}};
+const initial={version:2,settings:{timezone:'Europe/Moscow',defaultUrl:'https://example.com/music.mp3'},slots:{'48':{url:'https://example.com/existing.mp3'}}};
+const room=new RadioRoom({storage,blockConcurrencyWhile:fn=>fn()},{SCHEDULES:{get:async()=>JSON.stringify(initial)},RADIO_WRITE_KEY:'admin-test'});
+const req=(path,method,body,headers={})=>room.fetch(new Request('https://test.invalid'+path,{method,headers:{'Content-Type':'application/json',...headers},...(body?{body:JSON.stringify(body)}:{})}));
+assert.equal((await (await req('/','GET')).json()).slots['48'].url,initial.slots['48'].url);
+const first={token:'a'.repeat(64),revision:'',slot:{url:'https://example.com/audio.mp3',author:'Федя',userTitle:'Программа'}};
+assert.equal((await req('/slots/49','PUT',first)).status,200);
+const current=await (await req('/','GET')).json();assert.equal(current.slots['49'].author,'Федя');
+assert.equal((await req('/slots/49','PUT',{...first,token:'b'.repeat(64),revision:current.slots['49'].revision})).status,409);
+assert.equal((await req('/slots/49','PUT',{...first,revision:''})).status,409);
+assert.equal((await req('/slots/49','PUT',{...first,revision:current.slots['49'].revision})).status,200);
+assert.equal((await req('/chat/49','POST',{text:'Привет'})).status,200);assert.equal((await (await req('/chat/49','GET')).json())[0].text,'Привет');
+assert.equal((await req('/','PUT',initial)).status,403);assert.equal((await req('/','PUT',initial,{'X-Radio-Key':'admin-test'})).status,200);assert.equal((await (await req('/','GET')).json()).slots['49'].author,'Федя');
+console.log('Schedule import, claims, conflicts, chat and admin preservation passed');
