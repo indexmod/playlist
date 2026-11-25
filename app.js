@@ -50,7 +50,33 @@ function draw(){
     loadChat(key,messages);
   }
 }
-async function loadChat(key,el){try{let r=await fetch(API+'chat/'+key,{cache:'no-store'});if(!r.ok)return;let rows=await r.json();el.textContent='';rows.forEach(row=>{let item=document.createElement('p');item.textContent=row.text;el.append(item)})}catch{}}
+const commentMarks=['●','○','◆','◇','■','□','✦','✧','✶','✷','▲'];
+function commentMark(row){
+  // Keep the same mark for a saved comment in every browser.
+  const seed=`${row.time}:${row.text}`;
+  let hash=2166136261;
+  for(let i=0;i<seed.length;i++)hash=Math.imul(hash^seed.charCodeAt(i),16777619);
+  return commentMarks[(hash>>>0)%commentMarks.length];
+}
+async function loadChat(key,el){
+  try{
+    const response=await fetch(API+'chat/'+key,{cache:'no-store'});
+    if(!response.ok)return;
+    const rows=await response.json();
+    el.textContent='';
+    for(const row of rows){
+      const item=document.createElement('p');
+      const mark=document.createElement('span');
+      mark.className='comment-mark';
+      mark.setAttribute('aria-hidden','true');
+      mark.textContent=commentMark(row);
+      const message=document.createElement('span');
+      message.textContent=row.text;
+      item.append(mark,message);
+      el.append(item);
+    }
+  }catch{}
+}
 let authorLabel=document.createElement('label');authorLabel.textContent='Подпись (необязательно)';let authorInput=document.createElement('input');authorInput.name='author';authorInput.maxLength=80;authorInput.placeholder='Имя или псевдоним';authorLabel.append(authorInput);$('#editor-form').insertBefore(authorLabel,$('#original-title'));
 let editingRevision='';
 function editorError(message=''){
