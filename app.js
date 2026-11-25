@@ -2,7 +2,7 @@ const KEY='personal-radio-schedule-v2-cloud',SETTINGS_PASSWORD_HASH='6a61eb7383e
 const SEED=[['Вход в лабиринт','https://www.youtube.com/watch?v=SwOWMrHAS2o'],['Ивы для альпинария','https://www.youtube.com/watch?v=CXDCBn29Yqo&t=214s'],['Почему Азовское море','https://www.youtube.com/watch?v=zV_S-Cv6U4k'],['Проксима b','https://www.youtube.com/watch?v=-GXVoE7d9FE&t=1674s'],['Короткие встречи','https://www.youtube.com/watch?v=Qaj3RRFNP5c'],['Внутренний ребёнок','https://www.youtube.com/watch?v=LSgKMqvtDjQ'],['Банки Уорхола','https://www.youtube.com/watch?v=4N3Gq1eioLI'],['Путешествие по галактике','https://www.youtube.com/watch?v=pcElsNXRZmU'],['Главная шиза русского языка','https://www.youtube.com/watch?v=RUV-d1-ocqQ&t=816s'],['Настройщик','https://www.youtube.com/watch?v=ZyqH0v7Nyz8'],['План реконструкции Москвы','https://www.youtube.com/watch?v=tT391lJV2x4'],['Придумать себя','https://www.youtube.com/watch?v=tRTA1oro0Ow'],['Собака Баскервилей','https://www.youtube.com/watch?v=FO55XSs1guE'],['Увлеченья','https://www.youtube.com/watch?v=GIHXUn7lglw'],['Из жизни отдыхающих','https://www.youtube.com/watch?v=uYw1w6OoV9k']];
 const fresh=()=>({version:2,settings:{timezone:'Europe/Moscow',defaultUrl:'',defaultTitle:'',idDuration:30,idUrl:'assets/station_id_30s.mp3'},slots:{}});
 const $=s=>document.querySelector(s),audio=$('#audio-player'),API=window.RADIO_API_URL||'';let state=read(),selected,player,ready=false,playing=false,last='',writeKey='',playRun=0,completedFrame='';
-function read(){try{let x=JSON.parse(localStorage.getItem(KEY));if(!x||x.version!==2||!x.settings||!x.slots)return fresh();x.settings=Object.assign({},fresh().settings,x.settings);return x}catch{return fresh()}}function save(){localStorage.setItem(KEY,JSON.stringify(state));if(!API){note('Расписание сохранено только локально.',true);return}if(!writeKey){note('Введите ключ Cloudflare через настройки, затем сохраните.',true);return}fetch(API,{method:'PUT',headers:{'Content-Type':'application/json','X-Radio-Key':writeKey},body:JSON.stringify(state)}).then(function(r){if(!r.ok)throw Error();note('Расписание сохранено в Cloudflare.')}).catch(function(){note('Cloudflare не сохранил расписание: проверьте ключ.',true)})}function remote(attempt){if(!API)return;fetch(API,{cache:'no-store'}).then(function(r){if(!r.ok)throw Error();return r.json()}).then(function(x){if(x&&x.version===2&&x.settings&&x.slots){state=x;localStorage.setItem(KEY,JSON.stringify(state));draw();tick();note('Расписание загружено.')}}).catch(function(){if(!attempt){setTimeout(function(){remote(true)},700);return}note('Не удалось загрузить расписание Cloudflare.',true)})}function note(t,b=false){let n=$('#notice');n.textContent=t;n.classList.toggle('error',b)}function k(d,h){return String(48+h)}
+function read(){try{let x=JSON.parse(localStorage.getItem(KEY));if(!x||x.version!==2||!x.settings||!x.slots)return fresh();x.settings=Object.assign({},fresh().settings,x.settings);return x}catch{return fresh()}}function save(){localStorage.setItem(KEY,JSON.stringify(state));if(!API){note('Расписание сохранено только локально.',true);return}if(!writeKey){note('Введите ключ Cloudflare через настройки, затем сохраните.',true);return}fetch(API,{method:'PUT',headers:{'Content-Type':'application/json','X-Radio-Key':writeKey},body:JSON.stringify(state)}).then(function(r){if(!r.ok)throw Error();note('Расписание сохранено в Cloudflare.')}).catch(function(){note('Cloudflare не сохранил расписание: проверьте ключ.',true)})}function remote(attempt){if(!API)return;return fetch(API,{cache:'no-store'}).then(function(r){if(!r.ok)throw Error();return r.json()}).then(function(x){if(x&&x.version===2&&x.settings&&x.slots){state=x;localStorage.setItem(KEY,JSON.stringify(state));draw();tick();note('Расписание загружено.')}}).catch(function(){if(!attempt){setTimeout(function(){remote(true)},700);return}note('Не удалось загрузить расписание Cloudflare.',true)})}function note(t,b=false){let n=$('#notice');n.textContent=t;n.classList.toggle('error',b)}function k(d,h){return String(48+h)}
 function now(date=new Date()){let zone=state.settings.timezone;try{new Intl.DateTimeFormat('en-US',{timeZone:zone})}catch{zone='Europe/Moscow';state.settings.timezone=zone;save();note('Часовой пояс сброшен на Europe/Moscow.',true)}let o=Object.fromEntries(new Intl.DateTimeFormat('en-US',{timeZone:zone,weekday:'short',hour:'2-digit',minute:'2-digit',second:'2-digit',hourCycle:'h23'}).formatToParts(date).filter(x=>x.type!='literal').map(x=>[x.type,x.value]));return{day:['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].indexOf(o.weekday),hour:+o.hour,min:+o.minute,sec:+o.second}}
 function fallback(){return{type:'program',url:state.settings.defaultUrl,originalTitle:state.settings.defaultTitle,userTitle:'',start:0,inherited:true}}function get(d,h){return Object.assign({},state.slots[k(d,h)]||fallback())}function name(x){return x.userTitle||x.originalTitle||''}function duration(x){return Math.max(1,Math.min(300,+x.idDuration||+state.settings.idDuration||30))}
 function frame(){let p=now(),x=get(p.day,p.hour),s=p.min*60+p.sec,id=duration(x);return s>=3600-id?{kind:'id',url:state.settings.idUrl,start:s-(3600-id),key:`id:${k(p.day,p.hour)}`,p}:{kind:'program',url:x.url,start:(+x.start||0)+s,key:`program:${k(p.day,p.hour)}:${x.url}`,p,x}}
@@ -12,9 +12,70 @@ async function loadChat(key,el){try{let r=await fetch(API+'chat/'+key,{cache:'no
 async function drop(e){e.preventDefault();e.currentTarget.classList.remove('drag-over');let target=e.currentTarget.dataset.key,from=e.dataTransfer.getData('application/x-radio-slot');if(from){if(from!==target){state.slots[target]=state.slots[from];delete state.slots[from];save();draw();note('Источник перемещён.')}return}let url=e.dataTransfer.getData('text/uri-list')||e.dataTransfer.getData('text/plain');let f=[...e.dataTransfer.files][0];if(f&&/\.(webloc|url)$/i.test(f.name)){let t=await f.text();url=(t.match(/<string>(https?:\/\/[^<]+)/i)||t.match(/^URL=(.+)$/mi)||[])[1]||''}if(!/^https?:\/\//i.test(url)){note('Перетащите ссылку YouTube, .webloc или .url.',true);return}let x={type:'program',url,originalTitle:label(url),userTitle:'',start:0};state.slots[target]=x;save();draw();note('Источник добавлен.');fetchTitle(x);}
 function label(url){try{return new URL(url).hostname.includes('youtube')?'YouTube-клип':new URL(url).pathname.split('/').pop()||'Аудио'}catch{return'Источник'}}async function fetchTitle(x){if(!isYT(x.url))return;try{let r=await fetch('https://www.youtube.com/oembed?url='+encodeURIComponent(x.url)+'&format=json'),j=await r.json();x.originalTitle=j.title||x.originalTitle;save();draw()}catch{}}
 let authorLabel=document.createElement('label');authorLabel.textContent='Автор';let authorInput=document.createElement('input');authorInput.name='author';authorInput.maxLength=80;authorInput.placeholder='Ваше имя или псевдоним';authorLabel.append(authorInput);$('#editor-form').insertBefore(authorLabel,$('#original-title'));
-let editingRevision='';function edit(key){selected=key;let x=state.slots[key]||fallback(),h=+key%24,f=$('#editor-form');editingRevision=x.revision||'';$('#editor-heading').textContent=`${String(h).padStart(2,'0')}:00`;f.url.value=x.url||'';f.userTitle.value=x.userTitle||'';f.elements.author.value=x.author||'';f.start.value=x.start||0;$('#original-title').textContent=x.originalTitle?'Исходное: '+x.originalTitle:'';$('#editor').showModal()}
+let editingRevision='';
+function editorError(message=''){
+  const error=$('#editor-error');
+  error.textContent=message;
+  error.hidden=!message;
+}
+function edit(key){
+  selected=key;
+  const x=state.slots[key]||fallback(), h=Number(key)%24, form=$('#editor-form');
+  editingRevision=x.revision||'';
+  $('#editor-heading').textContent=`${String(h).padStart(2,'0')}:00`;
+  form.url.value=x.url||'';
+  form.userTitle.value=x.userTitle||'';
+  form.elements.author.value=x.author||'';
+  form.start.value=x.start||0;
+  $('#original-title').textContent=x.originalTitle?'Исходное: '+x.originalTitle:'';
+  $('#clear-cell').hidden=!state.slots[key];
+  editorError();
+  $('#editor').showModal();
+}
 function visitorToken(){let token=localStorage.getItem('radio-visitor-token');if(!token){let bytes=new Uint8Array(32);crypto.getRandomValues(bytes);token=Array.from(bytes,x=>x.toString(16).padStart(2,'0')).join('');localStorage.setItem('radio-visitor-token',token)}return token}
-$('#editor-form').onsubmit=async e=>{if(e.submitter?.value==='cancel')return;e.preventDefault();let f=e.currentTarget,old=state.slots[selected]||{},x={type:'program',url:f.url.value.trim(),userTitle:f.userTitle.value.trim(),author:f.elements.author.value.trim(),originalTitle:old.url===f.url.value.trim()?(old.originalTitle||''):'',start:+f.start.value||0};if(!x.url||!x.author){note('Укажите ссылку и имя автора.',true);return}try{let r=await fetch(API+'slots/'+selected,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:visitorToken(),revision:editingRevision,slot:x})});if(r.status===409){note('Ячейку занял другой слушатель. Выберите другую или дождитесь окончания её эфира.',true);return}if(!r.ok)throw Error();$('#editor').close();remote();note('Программа сохранена.')}catch{note('Не удалось сохранить программу. Проверьте соединение.',true)}};$('#clear-cell').onclick=()=>note('Пока доступно только сохранение программы.',true);
+let slotRequestPending=false;
+async function updateSlot(method, slot){
+  if(slotRequestPending)return;
+  const key=selected, revision=editingRevision;
+  const clear=method==='DELETE', headers={'Content-Type':'application/json'};
+  if(clear&&writeKey)headers['X-Radio-Key']=writeKey;
+  slotRequestPending=true;
+  editorError();
+  try{
+    const response=await fetch(API+'slots/'+key,{
+      method,headers,body:JSON.stringify({token:visitorToken(),revision,slot})
+    });
+    if(response.status===403){
+      editorError('Очистить ячейку может автор из своего браузера или администратор с ключом Cloudflare.');
+      return;
+    }
+    if(response.status===409){
+      editorError(clear?'Запись изменилась. Откройте ячейку заново.':'Ячейку занял другой слушатель или запись изменилась. Выберите другую ячейку или откройте эту заново.');
+      remote();
+      return;
+    }
+    if(!response.ok)throw Error();
+    if(selected===key&&editingRevision===revision)$('#editor').close();
+    await remote();
+    note(clear?'Ячейка очищена.':'Программа сохранена.');
+  }catch{
+    editorError(clear?'Не удалось очистить ячейку.':'Не удалось сохранить программу.');
+  }finally{
+    slotRequestPending=false;
+  }
+}
+$('#editor-form').onsubmit=e=>{
+  if(e.submitter?.value==='cancel')return;
+  e.preventDefault();
+  const form=e.currentTarget, old=state.slots[selected]||{}, url=form.url.value.trim();
+  const slot={
+    url,userTitle:form.userTitle.value.trim(),author:form.elements.author.value.trim(),
+    originalTitle:old.url===url?(old.originalTitle||''):'',start:Number(form.start.value)||0
+  };
+  if(!slot.url||!slot.author){editorError('Укажите ссылку и имя автора.');return}
+  updateSlot('PUT',slot);
+};
+$('#clear-cell').onclick=()=>updateSlot('DELETE');
 function onProgramEnd(){let a=frame();if(!playing||a.kind!=='program'||last!==a.key||!a.x||a.x.inherited)return;completedFrame=a.key;last='';sync()}
 audio.onended=onProgramEnd;
 function allowPlayer(){if(!player)return;let f=player.getIframe&&player.getIframe();if(f)f.setAttribute('allow','autoplay; encrypted-media; fullscreen; picture-in-picture')}function inject(){if(document.querySelector('[data-yt]'))return;let s=document.createElement('script');s.src='https://www.youtube.com/iframe_api';s.dataset.yt='';document.head.append(s)}window.onYouTubeIframeAPIReady=()=>{player=new YT.Player('youtube-player',{height:'200',width:'200',playerVars:{playsinline:1,controls:0,rel:0,enablejsapi:1,origin:location.origin},events:{onReady:()=>{allowPlayer();ready=true;last='';sync()},onStateChange:e=>{if(e.data===0)onProgramEnd()},onError:()=>note('Источник YouTube недоступен в этом браузере.',true),onAutoplayBlocked:()=>note('Браузер заблокировал запуск. Нажмите Play ещё раз.',true)}});allowPlayer()};

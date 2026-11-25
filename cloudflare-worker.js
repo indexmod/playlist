@@ -1,8 +1,10 @@
 // The Durable Object serializes changes; KV remains the original import source.
-const headers = {'Access-Control-Allow-Origin':'https://indexmod.github.io','Access-Control-Allow-Methods':'GET, PUT, POST, OPTIONS','Access-Control-Allow-Headers':'Content-Type, X-Radio-Key','Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store'};
+const headers = {'Access-Control-Allow-Origin':'https://indexmod.github.io','Access-Control-Allow-Methods':'GET, PUT, POST, DELETE, OPTIONS','Access-Control-Allow-Headers':'Content-Type, X-Radio-Key','Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store'};
 const empty = {version:2,settings:{timezone:'Europe/Moscow',defaultUrl:'',defaultTitle:'',idDuration:30,idUrl:'assets/station_id_30s.mp3'},slots:{}};
 const reply=(data,status=200)=>new Response(JSON.stringify(data),{status,headers});
 const validSlot=k=>/^([4-6][0-9]|7[01])$/.test(k)&&Number(k)>=48;
+const validToken=token=>typeof token==='string'&&token.length>=32&&token.length<=200;
+const isAdmin=(request,env)=>Boolean(env.RADIO_WRITE_KEY&&request.headers.get('X-Radio-Key')===env.RADIO_WRITE_KEY);
 function nextEnd(hour,zone){const now=Date.now();const parts=new Intl.DateTimeFormat('en-GB',{timeZone:zone,hour:'2-digit',minute:'2-digit',second:'2-digit',hourCycle:'h23'}).formatToParts(new Date(now));const get=t=>Number(parts.find(x=>x.type===t).value);let offset=(hour-get('hour')+24)%24;return now+((offset+1)*3600-get('minute')*60-get('second'))*1000;}
 async function digest(token){let b=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(token));return Array.from(new Uint8Array(b),x=>x.toString(16).padStart(2,'0')).join('');}
 export class RadioRoom {
@@ -17,6 +19,26 @@ export class RadioRoom {
     const match=u.pathname.match(/^\/(slots|chat)\/(\d+)$/);if(!match||!validSlot(match[2]))return reply({error:'not found'},404);let key=match[2];
     if(match[1]==='chat'&&method==='GET')return reply(await this.state.storage.get('chat:'+key)||[]);
     if(match[1]==='chat'&&method==='POST'){let body=await request.json(),text=String(body.text||'').trim();if(!text||text.length>500)return reply({error:'invalid message'},400);await this.state.storage.transaction(async tx=>{let rows=await tx.get('chat:'+key)||[];rows.push({text,time:Date.now()});await tx.put('chat:'+key,rows.slice(-100));});return reply({ok:true});}
+    if(match[1]==='slots'&&method==='DELETE'){
+      const body=await request.json().catch(()=>null);
+      if(!body||typeof body.revision!=='string')return reply({error:'invalid data'},400);
+      const admin=isAdmin(request,this.env);
+      const ownerHash=validToken(body.token)?await digest(body.token):null;
+      if(!admin&&!ownerHash)return reply({error:'forbidden'},403);
+      const result=await this.state.storage.transaction(async tx=>{
+        const schedule=await tx.get('schedule');
+        const slot=schedule.slots[key];
+        if(!slot)return body.revision?409:200;
+        if(body.revision!==(slot.revision||''))return 409;
+        if(!admin&&slot.ownerHash!==ownerHash)return 403;
+        delete schedule.slots[key];
+        await tx.put('schedule',schedule);
+        return 200;
+      });
+      if(result===409)return reply({error:'conflict'},409);
+      if(result===403)return reply({error:'forbidden'},403);
+      return reply({ok:true});
+    }
     if(match[1]==='slots'&&method==='PUT'){let body=await request.json();if(typeof body.token!=='string'||body.token.length<32||body.token.length>200||!body.slot)return reply({error:'invalid data'},400);let tokenHash=await digest(body.token),s=body.slot;let url;try{url=new URL(s.url)}catch{return reply({error:'invalid url'},400)}if(!['https:','http:'].includes(url.protocol)||!String(s.author||'').trim()||String(s.author).length>80||String(s.userTitle||'').length>120)return reply({error:'invalid data'},400);
       let result=await this.state.storage.transaction(async tx=>{let data=await tx.get('schedule'),old=data.slots[key],rev=old&&old.revision||'';if((body.revision||'')!==rev)return {error:'conflict'};if(old&&old.lockUntil>Date.now()&&old.ownerHash!==tokenHash)return {error:'locked'};let slot={type:'program',url:url.href,userTitle:String(s.userTitle||'').trim(),originalTitle:String(s.originalTitle||'').slice(0,300),author:String(s.author).trim(),start:Math.max(0,Number(s.start)||0),ownerHash:tokenHash,lockUntil:nextEnd(Number(key)-48,data.settings.timezone||'Europe/Moscow'),revision:crypto.randomUUID()};data.slots[key]=slot;await tx.put('schedule',data);return {ok:true};});return reply(result,result.error?409:200);
     }return reply({error:'method not allowed'},405);
