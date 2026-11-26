@@ -248,7 +248,48 @@ $('#reset-radio').onclick=async event=>{
 function onProgramEnd(){let a=frame();if(!playing||a.kind!=='program'||last!==a.key||!a.x||a.x.inherited)return;completedFrame=a.key;last='';sync()}
 audio.onended=onProgramEnd;
 const youtubeLoadingMessage = 'YouTube-плеер загружается. Нажмите ▶, когда он будет готов.';
-const youtubeBlockedMessage = 'Браузер заблокировал запуск. Нажмите ▶ ещё раз.';
+let youtubeSource;
+let manualYoutube;
+
+function showYoutubePanel(visible) {
+  const panel = $('#youtube-panel');
+  panel.classList.toggle('is-visible', visible);
+  panel.setAttribute('aria-hidden', String(!visible));
+  panel.toggleAttribute('inert', !visible);
+}
+
+function offerManualYoutube(source) {
+  const frameKey = frame().key;
+  stopPlayback();
+  manualYoutube = {source, frameKey};
+  showYoutubePanel(true);
+  note('Нажмите ▶ в плеере YouTube, чтобы включить эфир.');
+  player.cueVideoById({videoId: vid(source.url), startSeconds: source.start});
+  player.getIframe()?.focus();
+}
+
+function handleYoutubeState(event) {
+  if (event.data === 0) onProgramEnd();
+  if (event.data !== 1 || !manualYoutube) return;
+
+  const {source, frameKey} = manualYoutube;
+  const current = frame();
+  manualYoutube = null;
+  if (current.key !== frameKey) {
+    stopPlayback();
+    note('Передача сменилась. Нажмите ▶ в шапке, чтобы включить эфир.');
+    return;
+  }
+
+  const start = source.key === current.key ? current.start : source.start;
+  playing = true;
+  playRun++;
+  last = source.key;
+  youtubeSource = source;
+  $('#play').textContent = '❚❚';
+  note('');
+  if (Math.abs(player.getCurrentTime() - start) >= 2) player.seekTo(start, true);
+}
 
 function allowPlayer() {
   const iframe = player?.getIframe?.();
@@ -273,7 +314,7 @@ window.onYouTubeIframeAPIReady = () => {
   player = new YT.Player('youtube-player', {
     height: '200',
     width: '200',
-    playerVars: {playsinline: 1, controls: 0, rel: 0, enablejsapi: 1, origin: location.origin},
+    playerVars: {playsinline: 1, controls: 1, rel: 0, enablejsapi: 1, origin: location.origin},
     events: {
       onReady: () => {
         allowPlayer();
@@ -282,20 +323,15 @@ window.onYouTubeIframeAPIReady = () => {
           note('YouTube-плеер готов. Нажмите ▶.');
         }
       },
-      onStateChange: event => {
-        if (event.data === 0) onProgramEnd();
-      },
+      onStateChange: handleYoutubeState,
       onError: () => {
-        if (playing && isYT(frame().url)) {
+        if (manualYoutube || (playing && youtubeSource)) {
           stopPlayback();
           note('Источник YouTube недоступен в этом браузере.', true);
         }
       },
       onAutoplayBlocked: () => {
-        if (playing && isYT(frame().url)) {
-          stopPlayback();
-          note(youtubeBlockedMessage, true);
-        }
+        if (playing && youtubeSource) offerManualYoutube(youtubeSource);
       }
     }
   });
@@ -326,10 +362,13 @@ function sync() {
     }
     audio.onloadedmetadata = null;
     audio.pause();
+    youtubeSource = source;
     player.loadVideoById({videoId: vid(source.url), startSeconds: source.start});
     return;
   }
 
+  youtubeSource = null;
+  showYoutubePanel(false);
   if (ready) player.stopVideo();
   const seek = () => {
     if (playing && run === playRun) {
@@ -367,6 +406,9 @@ function tick(){
 async function settings(){let password=window.prompt('Пароль для настроек');if(password===null)return;let bytes=new TextEncoder().encode(password),digest=await crypto.subtle.digest('SHA-256',bytes),hash=[...new Uint8Array(digest)].map(x=>x.toString(16).padStart(2,'0')).join('');if(hash!==SETTINGS_PASSWORD_HASH){note('Неверный пароль.',true);return}let f=$('#settings-form'),a;for(a in state.settings)if(f.elements[a])f.elements[a].value=state.settings[a];$('#settings').showModal()}$('#settings-button').onclick=settings;$('#settings-form').onsubmit=async e=>{if(e.submitter?.value==='cancel')return;e.preventDefault();let f=e.currentTarget,x=Object.fromEntries(new FormData(f));writeKey=x.writeKey||writeKey;delete x.writeKey;try{Intl.DateTimeFormat(undefined,{timeZone:x.timezone})}catch{note('Неизвестный часовой пояс.',true);return}x.idDuration=+x.idDuration;if(await saveSettings(x))$('#settings').close()};$('#export-data').onclick=()=>{let a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(state,null,2)],{type:'application/json'}));a.download='radio-schedule.json';a.click()};
 function stopPlayback() {
   playing = false;
+  youtubeSource = null;
+  manualYoutube = null;
+  showYoutubePanel(false);
   playRun++;
   last = '';
   audio.onloadedmetadata = null;
@@ -390,6 +432,7 @@ function toggle() {
     return;
   }
 
+  if (manualYoutube) stopPlayback();
   note('');
   playing = true;
   playRun++;
