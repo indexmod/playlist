@@ -2,52 +2,54 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 const source=await readFile(new URL('./cloudflare-worker.js',import.meta.url),'utf8');
 const {RadioRoom}=await import('data:text/javascript;base64,'+Buffer.from(source).toString('base64'));
-const store=new Map(),storage={async get(k){return structuredClone(store.get(k))},async put(k,v){store.set(k,structuredClone(v))},async delete(k){return store.delete(k)},async transaction(fn){return fn(this)}};
-const initial={version:2,settings:{timezone:'Europe/Moscow',defaultUrl:'https://example.com/music.mp3'},slots:{'48':{url:'https://example.com/existing.mp3'}}};
+
+const store=new Map([['chat:48',[{time:123,text:'Ранее сохранённый комментарий'}]]]);
+const storage={
+  async get(key){return structuredClone(store.get(key));},
+  async put(key,value){store.set(key,structuredClone(value));},
+  async delete(key){return store.delete(key);},
+  async list({prefix}){return new Map([...store].filter(([key])=>key.startsWith(prefix)).map(([key,value])=>[key,structuredClone(value)]));},
+  async transaction(fn){return fn(this);}
+};
+const initial={
+  version:2,settings:{timezone:'Europe/Moscow',defaultUrl:'https://example.com/music.mp3'},
+  slots:{48:{url:'https://example.com/existing.mp3',ownerHash:'previous',lockUntil:Date.now()+3600000}}
+};
 const room=new RadioRoom({storage,blockConcurrencyWhile:fn=>fn()},{SCHEDULES:{get:async()=>JSON.stringify(initial)},RADIO_WRITE_KEY:'admin-test'});
-const req=(path,method,body,headers={})=>room.fetch(new Request('https://test.invalid'+path,{method,headers:{'Content-Type':'application/json',...headers},...(body?{body:JSON.stringify(body)}:{})}));
-assert.equal((await (await req('/','GET')).json()).slots['48'].url,initial.slots['48'].url);
-const first={token:'a'.repeat(64),revision:'',slot:{url:'https://example.com/audio.mp3',author:'Федя',userTitle:'Программа'}};
-assert.equal((await req('/slots/49','PUT',first)).status,200);
-const current=await (await req('/','GET')).json();assert.equal(current.slots['49'].author,'Федя');
-assert.equal((await req('/slots/49','PUT',{...first,token:'b'.repeat(64),revision:current.slots['49'].revision})).status,409);
-assert.equal((await req('/slots/49','PUT',{...first,revision:''})).status,409);
-assert.equal((await req('/slots/49','PUT',{...first,revision:current.slots['49'].revision})).status,200);
-assert.equal((await req('/chat/49','POST',{text:'Привет'})).status,200);assert.equal((await (await req('/chat/49','GET')).json())[0].text,'Привет');
-assert.equal((await req('/','PUT',initial)).status,403);assert.equal((await req('/','PUT',initial,{'X-Radio-Key':'admin-test'})).status,200);assert.equal((await (await req('/','GET')).json()).slots['49'].author,'Федя');
-const afterEdit=await (await req('/','GET')).json();
-const deletion={token:first.token,revision:afterEdit.slots['49'].revision};
-const stranger={...deletion,token:'b'.repeat(64)};
-const adminHeaders={'X-Radio-Key':'admin-test'};
-assert.equal((await req('/slots/49','DELETE',stranger)).status,403);
-assert.equal((await req('/slots/49','DELETE',stranger,adminHeaders)).status,403);
-assert.equal((await req('/slots/49','DELETE',{revision:deletion.revision},adminHeaders)).status,403);
-assert.equal((await (await req('/chat/49','GET')).json())[0].text,'Привет');
-assert.equal((await req('/slots/49','DELETE',{...deletion,revision:current.slots['49'].revision})).status,409);
-assert.equal((await req('/slots/49','DELETE',deletion)).status,200);
-assert.equal((await (await req('/','GET')).json()).slots['49'],undefined);
-assert.deepEqual(await (await req('/chat/49','GET')).json(),[]);
-assert.equal((await req('/slots/48','DELETE',{token:first.token,revision:''})).status,403);
-assert.equal((await req('/slots/48','DELETE',{token:first.token,revision:''},adminHeaders)).status,403);
-assert.equal((await (await req('/','GET')).json()).slots['48'].url,initial.slots['48'].url);
-const anonymous={...first,slot:{url:first.slot.url}};
-assert.equal((await req('/slots/50','PUT',anonymous)).status,200);
-const readSlot=async key=>(await (await req('/','GET')).json()).slots[key];
-const claimed=await readSlot('50');
-assert.equal(claimed.author,'');
-assert.ok(claimed.lockUntil>Date.now());
-assert.equal((await req('/slots/50','PUT',{...first,token:'b'.repeat(64),revision:claimed.revision})).status,409);
-assert.equal((await req('/slots/50','PUT',{...first,token:'b'.repeat(64),revision:claimed.revision},adminHeaders)).status,409);
-const realNow=Date.now;
-try{
-  Date.now=()=>claimed.lockUntil+1000;
-  const nextVisitor={...first,token:'b'.repeat(64),revision:claimed.revision};
-  assert.equal((await req('/slots/50','DELETE',nextVisitor)).status,403);
-  assert.equal((await req('/slots/50','PUT',nextVisitor)).status,200);
-  const replacement=await readSlot('50');
-  assert.equal(replacement.author,first.slot.author);
-  assert.equal((await req('/slots/50','DELETE',{token:first.token,revision:replacement.revision})).status,403);
-}finally{
-  Date.now=realNow;
-}
-console.log('Schedule import, claims, conflicts, chat and owner-only deletion passed');
+const call=(path,method='GET',body,headers={})=>room.fetch(new Request('https://test.invalid'+path,{
+  method,headers:{'Content-Type':'application/json',...headers},...(body?{body:JSON.stringify(body)}:{})
+}));
+const read=async path=>(await call(path)).json();
+const admin={'X-Radio-Key':'admin-test'};
+const previous=await read('/live');
+assert.equal(previous.schedule.slots['48'].url,initial.slots['48'].url);
+assert.equal(previous.schedule.slots['48'].ownerHash,undefined);
+assert.equal(previous.schedule.slots['48'].lockUntil,undefined);
+assert.equal(previous.chats['48'][0].text,'Ранее сохранённый комментарий');
+
+assert.equal((await call('/slots/48','PUT',{slot:{url:initial.slots['48'].url,author:'Кино',busy:true}})).status,200);
+assert.equal((await read('/')).slots['48'].busy,true);
+assert.equal((await call('/slots/48','PUT',{revision:'stale',slot:{url:'https://example.com/next.mp3',author:'Автор · Кино',busy:false}})).status,200);
+assert.equal((await read('/')).slots['48'].author,'Автор · Кино');
+assert.equal((await read('/')).slots['48'].busy,false);
+assert.equal((await call('/slots/49','PUT',{slot:{author:'Музыка',busy:true}})).status,200);
+assert.equal((await read('/')).slots['49'].url,'');
+
+assert.equal((await call('/slots/48','DELETE')).status,200);
+assert.equal((await read('/')).slots['48'],undefined);
+const legacy=previous.chats['48'][0];
+assert.equal((await call('/chat/48/'+legacy.id,'PUT',{text:'Поправка'})).status,200);
+assert.equal((await read('/chat/48'))[0].text,'Поправка');
+assert.equal((await call('/chat/48','POST',{text:'Новая строка'})).status,200);
+const chat=(await read('/live')).chats['48'];
+assert.equal(chat.length,2);
+assert.equal((await call('/chat/48/'+chat[1].id,'PUT',{text:'Исправлено'})).status,200);
+assert.equal((await read('/chat/48'))[1].text,'Исправлено');
+assert.equal((await call('/chat/48/'+chat[1].id,'PUT',{text:''})).status,200);
+assert.equal((await read('/chat/48')).length,1);
+assert.equal((await call('/','PUT',initial)).status,403);
+assert.equal((await call('/','DELETE',{confirm:'reset'})).status,403);
+assert.equal((await call('/','DELETE',{},admin)).status,400);
+assert.equal((await call('/','DELETE',{confirm:'reset'},admin)).status,200);
+assert.deepEqual(await read('/live'),{schedule:{...initial,slots:{}},chats:{}});
+console.log('Public wiki editing, manual status, persistent and editable chat, and protected reset passed.');

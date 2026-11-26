@@ -1,77 +1,174 @@
-// The Durable Object serializes changes; KV remains the original import source.
-const headers = {'Access-Control-Allow-Origin':'https://indexmod.github.io','Access-Control-Allow-Methods':'GET, PUT, POST, DELETE, OPTIONS','Access-Control-Allow-Headers':'Content-Type, X-Radio-Key','Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store'};
-const empty = {version:2,settings:{timezone:'Europe/Moscow',defaultUrl:'',defaultTitle:'',idDuration:30,idUrl:'assets/station_id_30s.mp3'},slots:{}};
+// KV supplies the original schedule. The Durable Object stores the live station.
+const headers={
+  'Access-Control-Allow-Origin':'https://indexmod.github.io',
+  'Access-Control-Allow-Methods':'GET, PUT, POST, DELETE, OPTIONS',
+  'Access-Control-Allow-Headers':'Content-Type, X-Radio-Key',
+  'Content-Type':'application/json; charset=utf-8',
+  'Cache-Control':'no-store'
+};
+const empty={version:2,settings:{timezone:'Europe/Moscow',defaultUrl:'',defaultTitle:'',idDuration:30,idUrl:'assets/station_id_30s.mp3'},slots:{}};
 const reply=(data,status=200)=>new Response(JSON.stringify(data),{status,headers});
-const validSlot=k=>/^([4-6][0-9]|7[01])$/.test(k)&&Number(k)>=48;
-const validToken=token=>typeof token==='string'&&token.length>=32&&token.length<=200;
 const isAdmin=(request,env)=>Boolean(env.RADIO_WRITE_KEY&&request.headers.get('X-Radio-Key')===env.RADIO_WRITE_KEY);
-function nextEnd(hour,zone){const now=Date.now();const parts=new Intl.DateTimeFormat('en-GB',{timeZone:zone,hour:'2-digit',minute:'2-digit',second:'2-digit',hourCycle:'h23'}).formatToParts(new Date(now));const get=t=>Number(parts.find(x=>x.type===t).value);let offset=(hour-get('hour')+24)%24;return now+((offset+1)*3600-get('minute')*60-get('second'))*1000;}
-async function digest(token){let b=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(token));return Array.from(new Uint8Array(b),x=>x.toString(16).padStart(2,'0')).join('');}
-export class RadioRoom {
-  constructor(state,env){this.state=state;this.env=env;this.ready=state.blockConcurrencyWhile(async()=>{let v=await state.storage.get('schedule');if(!v){let raw=await env.SCHEDULES.get('current');let initial=raw?JSON.parse(raw):structuredClone(empty);if(!initial||initial.version!==2||!initial.slots||!initial.settings)throw Error('Invalid existing schedule');await state.storage.put('schedule',initial);}});}
-  async fetch(request){await this.ready;let u=new URL(request.url),method=request.method;
-    if(method==='GET'&&u.pathname==='/'){
-      const schedule=await this.state.storage.get('schedule');
-      for(const slot of Object.values(schedule.slots)) delete slot.ownerHash;
-      return reply(schedule);
+const validSlot=key=>/^\d{2}$/.test(key)&&Number(key)>=48&&Number(key)<=71;
+const legacyId=(row,index)=>'legacy-'+row.time+'-'+index;
+
+function publicSchedule(schedule){
+  for(const slot of Object.values(schedule.slots)){
+    delete slot.ownerHash;
+    delete slot.lockUntil;
+  }
+  return schedule;
+}
+
+async function readChats(storage,key){
+  const chats={};
+  const old=key
+    ? [['chat:'+key,await storage.get('chat:'+key)||[]]]
+    : await storage.list({prefix:'chat:'});
+  for(const [storageKey,rows] of old){
+    chats[storageKey.slice(5)]=rows.flatMap((row,index)=>row?[{...row,id:legacyId(row,index)}]:[]);
+  }
+  const messages=await storage.list({prefix:key?'comment:'+key+':':'comment:'});
+  for(const [storageKey,row] of messages){
+    const hour=storageKey.split(':')[1];
+    (chats[hour]??=[]).push(row);
+  }
+  for(const rows of Object.values(chats))rows.sort((a,b)=>a.time-b.time);
+  return chats;
+}
+
+async function changeComment(storage,key,id,text){
+  return storage.transaction(async tx=>{
+    const legacy=id.match(/^legacy-(\d+)-(\d+)$/);
+    if(legacy){
+      const storageKey='chat:'+key, rows=await tx.get(storageKey)||[];
+      const index=Number(legacy[2]), row=rows[index];
+      if(!row||legacyId(row,index)!==id)return false;
+      rows[index]=text?{...row,text}:null;
+      await tx.put(storageKey,rows);
+      return true;
     }
-    if(method==='PUT'&&u.pathname==='/'){if(!isAdmin(request,this.env))return reply({error:'forbidden'},403);let data=await request.json();if(!data||data.version!==2||!data.settings||!data.slots)return reply({error:'invalid schedule'},400);await this.state.storage.transaction(async tx=>{let current=await tx.get('schedule');current.settings=data.settings;await tx.put('schedule',current)});return reply({ok:true});}
-    const match=u.pathname.match(/^\/(slots|chat)\/(\d+)$/);if(!match||!validSlot(match[2]))return reply({error:'not found'},404);let key=match[2];
-    if(match[1]==='chat'&&method==='GET')return reply(await this.state.storage.get('chat:'+key)||[]);
-    if(match[1]==='chat'&&method==='POST'){let body=await request.json(),text=String(body.text||'').trim();if(!text||text.length>500)return reply({error:'invalid message'},400);await this.state.storage.transaction(async tx=>{let rows=await tx.get('chat:'+key)||[];rows.push({text,time:Date.now()});await tx.put('chat:'+key,rows.slice(-100));});return reply({ok:true});}
-    if(match[1]==='slots'&&method==='DELETE'){
+    const storageKey='comment:'+key+':'+id;
+    const row=await tx.get(storageKey);
+    if(!row)return false;
+    if(text)await tx.put(storageKey,{...row,text});
+    else await tx.delete(storageKey);
+    return true;
+  });
+}
+
+export class RadioRoom{
+  constructor(state,env){
+    this.storage=state.storage;
+    this.env=env;
+    this.ready=state.blockConcurrencyWhile(async()=>{
+      if(await this.storage.get('schedule'))return;
+      const raw=await env.SCHEDULES.get('current');
+      const initial=raw?JSON.parse(raw):structuredClone(empty);
+      if(initial?.version!==2||!initial.slots||!initial.settings)throw Error('Invalid existing schedule');
+      await this.storage.put('schedule',initial);
+    });
+  }
+
+  async fetch(request){
+    await this.ready;
+    const {pathname}=new URL(request.url);
+    const method=request.method, storage=this.storage;
+    if(method==='GET'&&pathname==='/')return reply(publicSchedule(await storage.get('schedule')));
+    if(method==='GET'&&pathname==='/live'){
+      const schedule=await storage.get('schedule');
+      return reply({schedule:publicSchedule(schedule),chats:await readChats(storage)});
+    }
+    if(pathname==='/'&&(method==='PUT'||method==='DELETE')){
+      if(!isAdmin(request,this.env))return reply({error:'forbidden'},403);
       const body=await request.json().catch(()=>null);
-      if(!body||typeof body.revision!=='string')return reply({error:'invalid data'},400);
-      if(!validToken(body.token))return reply({error:'forbidden'},403);
-      const ownerHash=await digest(body.token);
-      const result=await this.state.storage.transaction(async tx=>{
-        const schedule=await tx.get('schedule');
-        const slot=schedule.slots[key];
-        if(body.revision!==(slot?.revision||''))return 409;
-        if(slot?.ownerHash!==ownerHash)return 403;
-        delete schedule.slots[key];
-        await tx.put('schedule',schedule);
-        await tx.delete('chat:'+key);
-        return 200;
-      });
-      if(result===409)return reply({error:'conflict'},409);
-      if(result===403)return reply({error:'forbidden'},403);
+      if(method==='PUT'){
+        if(body?.version!==2||!body.settings)return reply({error:'invalid settings'},400);
+        await storage.transaction(async tx=>{
+          const schedule=await tx.get('schedule');
+          schedule.settings=body.settings;
+          await tx.put('schedule',schedule);
+        });
+      }else{
+        if(body?.confirm!=='reset')return reply({error:'confirmation required'},400);
+        await storage.transaction(async tx=>{
+          const schedule=await tx.get('schedule');
+          schedule.slots={};
+          await tx.put('schedule',schedule);
+          for(const prefix of ['chat:','comment:']){
+            const data=await tx.list({prefix});
+            for(const key of data.keys())await tx.delete(key);
+          }
+        });
+      }
       return reply({ok:true});
     }
-    if(match[1]==='slots'&&method==='PUT'){
-      const body=await request.json().catch(()=>null);
-      if(!body?.slot||typeof body.revision!=='string'||!validToken(body.token)){
-        return reply({error:'invalid data'},400);
-      }
-      const program=body.slot;
-      const author=String(program.author??'').trim();
-      const title=String(program.userTitle??'').trim();
-      let url;
-      try{url=new URL(program.url)}catch{return reply({error:'invalid url'},400)}
-      if(!['https:','http:'].includes(url.protocol)||author.length>80||title.length>120){
-        return reply({error:'invalid data'},400);
-      }
-      const tokenHash=await digest(body.token);
-      const result=await this.state.storage.transaction(async tx=>{
-        const schedule=await tx.get('schedule');
-        const previous=schedule.slots[key];
-        if(body.revision!==(previous?.revision||''))return {error:'conflict'};
-        if(previous?.lockUntil>Date.now()&&previous.ownerHash!==tokenHash){
-          return {error:'locked'};
+
+    const match=pathname.match(/^\/(slots|chat)\/(\d+)(?:\/([a-zA-Z0-9-]{1,80}))?$/);
+    if(!match||!validSlot(match[2]))return reply({error:'not found'},404);
+    const [,resource,key,id]=match;
+    if(resource==='chat'){
+      if(method==='GET'&&!id)return reply((await readChats(storage,key))[key]||[]);
+      if((method==='POST'&&!id)||(method==='PUT'&&id)){
+        const body=await request.json().catch(()=>null);
+        if(typeof body?.text!=='string')return reply({error:'invalid message'},400);
+        const text=body.text.trim();
+        if(text.length>500||(!text&&method==='POST'))return reply({error:'invalid message'},400);
+        if(id){
+          if(!await changeComment(storage,key,id,text))return reply({error:'not found'},404);
+        }else{
+          const row={id:crypto.randomUUID(),text,time:Date.now()};
+          await storage.put('comment:'+key+':'+row.id,row);
         }
-        const slot={
-          type:'program',url:url.href,userTitle:title,author,
-          originalTitle:String(program.originalTitle??'').slice(0,300),
-          start:Math.max(0,Number(program.start)||0),revision:crypto.randomUUID(),
-          ownerHash:tokenHash,
-          lockUntil:nextEnd(Number(key)-48,schedule.settings.timezone||'Europe/Moscow')
-        };
-        schedule.slots[key]=slot;
-        await tx.put('schedule',schedule);
-        return {ok:true};
-      });
-      return reply(result,result.error?409:200);
-    }return reply({error:'method not allowed'},405);
+        return reply({ok:true});
+      }
+    }else if(!id){
+      if(method==='DELETE'){
+        await storage.transaction(async tx=>{
+          const schedule=await tx.get('schedule');
+          delete schedule.slots[key];
+          await tx.put('schedule',schedule);
+        });
+        return reply({ok:true});
+      }
+      if(method==='PUT'){
+        const body=await request.json().catch(()=>null);
+        const program=body?.slot;
+        if(!program)return reply({error:'invalid data'},400);
+        const author=String(program.author??'').trim();
+        const title=String(program.userTitle??'').trim();
+        let url=String(program.url??'').trim();
+        if(url){
+          try{
+            const parsed=new URL(url);
+            if(!['https:','http:'].includes(parsed.protocol))throw Error();
+            url=parsed.href;
+          }catch{return reply({error:'invalid url'},400)}
+        }
+        if(author.length>80||title.length>120||url.length>2048)return reply({error:'invalid data'},400);
+        await storage.transaction(async tx=>{
+          const schedule=await tx.get('schedule');
+          schedule.slots[key]={
+            type:'program',url,userTitle:title,author,busy:program.busy===true,
+            originalTitle:String(program.originalTitle??'').slice(0,300),
+            start:Math.max(0,Number(program.start)||0)
+          };
+          await tx.put('schedule',schedule);
+        });
+        return reply({ok:true});
+      }
+    }
+    return reply({error:'method not allowed'},405);
   }
 }
-export default {async fetch(request,env){if(request.method==='OPTIONS')return new Response(null,{headers});try{return await env.RADIO_ROOM.get(env.RADIO_ROOM.idFromName('station')).fetch(request)}catch(e){return reply({error:'service unavailable'},503)}}};
+
+export default {
+  async fetch(request,env){
+    if(request.method==='OPTIONS')return new Response(null,{headers});
+    try{
+      return await env.RADIO_ROOM.get(env.RADIO_ROOM.idFromName('station')).fetch(request);
+    }catch{
+      return reply({error:'service unavailable'},503);
+    }
+  }
+};
