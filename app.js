@@ -238,6 +238,68 @@ function editorError(message=''){
   error.textContent=message;
   error.hidden=!message;
 }
+function parseCardUrl(value) {
+  const raw = value.trim();
+  if (!raw) return null;
+  const markdown = raw.match(/^\[[^\]]*\]\(\s*(https?:\/\/\S+?)\s*\)$/i);
+  const parsed = new URL((markdown?.[1] || raw).replace(/\\&|&amp;/gi, '&'));
+  if (!['https:', 'http:'].includes(parsed.protocol) || parsed.href.length > 2048) throw Error();
+  return parsed;
+}
+
+function youtubeStart(url) {
+  if (!url || !isYT(url.href)) return 0;
+  const offset = url.searchParams.get('t') || url.searchParams.get('start') || '';
+  if (/^\d+s?$/i.test(offset)) return Number.parseInt(offset, 10) || 0;
+  const parts = offset.match(/^(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?$/i);
+  return parts ? (+parts[1] || 0) * 3600 + (+parts[2] || 0) * 60 + (+parts[3] || 0) : 0;
+}
+
+let titlePreview;
+let titleTimer;
+let titleRequest;
+function previewCardTitle(value, saved = {}) {
+  clearTimeout(titleTimer);
+  titleRequest?.abort();
+  titlePreview = null;
+  const caption = $('#original-title');
+  let url;
+  try {
+    url = parseCardUrl(value);
+  } catch {
+    caption.textContent = '';
+    return;
+  }
+
+  if (!url) {
+    caption.textContent = state.settings.defaultTitle ? 'По умолчанию: ' + state.settings.defaultTitle : '';
+    return;
+  }
+
+  const youtube = isYT(url.href);
+  const title = (saved.url === url.href && saved.originalTitle) || (youtube ? 'YouTube' : 'Аудио');
+  titlePreview = {url: url.href, title};
+  caption.textContent = 'Исходное: ' + title;
+  const videoId = youtube ? vid(url.href) : '';
+  if (title !== 'YouTube' || !/^[\w-]{11}$/.test(videoId)) return;
+
+  const controller = new AbortController();
+  titleRequest = controller;
+  titleTimer = setTimeout(async () => {
+    try {
+      const endpoint = new URL('https://www.youtube.com/oembed');
+      endpoint.searchParams.set('url', 'https://www.youtube.com/watch?v=' + videoId);
+      endpoint.searchParams.set('format', 'json');
+      const response = await fetch(endpoint.href, {signal: controller.signal});
+      if (!response.ok) return;
+      const result = await response.json();
+      if (controller.signal.aborted || !$('#editor').open || typeof result.title !== 'string' || !result.title.trim()) return;
+      titlePreview = {url: url.href, title: result.title.trim().slice(0, 300)};
+      caption.textContent = 'Исходное: ' + titlePreview.title;
+    } catch {}
+  }, 250);
+}
+
 const slotWrites = new Set();
 const unsavedSlots = new Map();
 
@@ -255,7 +317,7 @@ function edit(key){
   form.elements.author.value=x.author||'';
   form.elements.busy.value=x.busy?'busy':'free';
   form.start.value=x.start||0;
-  $('#original-title').textContent=x.originalTitle?'Исходное: '+x.originalTitle:'';
+  previewCardTitle(x.url || '', x);
   $('#clear-cell').hidden=!state.slots[key];
   editorError();
   $('#editor').showModal();
@@ -270,7 +332,7 @@ async function updateSlot(method, slot) {
   note(clear ? 'Очищаем ячейку' : 'Сохраняем программу');
 
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 12000);
+  const timeout = setTimeout(() => controller.abort(), 25000);
   try {
     const response = await fetch(API + 'slots/' + key, {
       method,
@@ -286,36 +348,47 @@ async function updateSlot(method, slot) {
     tick();
     note(clear ? 'Ячейка очищена' : 'Программа сохранена');
     remote(true);
-  } catch {
+  } catch (error) {
     if (!clear) unsavedSlots.set(key, slot);
-    note(clear ? 'Не удалось очистить ячейку' : 'Не удалось сохранить программу — откройте ячейку, чтобы повторить', true);
+    if (error?.name === 'AbortError') {
+      note('Сервер не ответил вовремя — откройте ячейку, чтобы повторить', true);
+    } else {
+      note(clear ? 'Не удалось очистить ячейку' : 'Не удалось сохранить программу — откройте ячейку, чтобы повторить', true);
+    }
   } finally {
     clearTimeout(timeout);
     slotWrites.delete(key);
   }
 }
-$('#editor-form').onsubmit=e=>{
-  if(e.submitter?.value==='cancel')return;
-  e.preventDefault();
-  const form=e.currentTarget, old=state.slots[selected]||{};
-  let url = form.url.value.trim();
-  if (url) {
-    try {
-      const parsed = new URL(url);
-      if (!['https:', 'http:'].includes(parsed.protocol)) throw Error();
-      url = parsed.href;
-    } catch {
-      editorError('Укажите ссылку, которая начинается с https:// или http://');
-      return;
-    }
+$('#editor-form').elements.url.oninput = event => {
+  const saved = unsavedSlots.get(selected) || state.slots[selected];
+  previewCardTitle(event.currentTarget.value, saved);
+};
+
+$('#editor-form').onsubmit = event => {
+  if (event.submitter?.value === 'cancel') return;
+  event.preventDefault();
+  const form = event.currentTarget;
+  const old = state.slots[selected] || {};
+  let parsed;
+  try {
+    parsed = parseCardUrl(form.url.value);
+  } catch {
+    editorError('Укажите действующую ссылку, которая начинается с https:// или http://');
+    return;
   }
-  const slot={
-    url,userTitle:form.userTitle.value.trim(),author:form.elements.author.value.trim(),
-    busy:form.elements.busy.value==='busy',
-    originalTitle:(old.url===url&&old.originalTitle)||(url?(isYT(url)?'YouTube':'Аудио'):''),
-    start:Math.max(0,Number(form.start.value)||0)
-  };
-  updateSlot('PUT',slot);
+
+  const url = parsed?.href || '';
+  const originalTitle = (titlePreview?.url === url && titlePreview.title)
+    || (old.url === url && old.originalTitle)
+    || (url ? (isYT(url) ? 'YouTube' : 'Аудио') : '');
+  const start = Math.max(0, Number(form.start.value) || 0) || youtubeStart(parsed);
+  updateSlot('PUT', {
+    url, originalTitle, start,
+    userTitle: form.userTitle.value.trim(),
+    author: form.elements.author.value.trim(),
+    busy: form.elements.busy.value === 'busy'
+  });
 };
 $('#clear-cell').onclick=()=>updateSlot('DELETE');
 $('#reset-radio').onclick=async event=>{
