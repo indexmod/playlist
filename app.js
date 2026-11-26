@@ -4,7 +4,7 @@ const fresh=()=>({version:2,settings:{timezone:'Europe/Moscow',defaultUrl:'',def
 const $=s=>document.querySelector(s),audio=$('#audio-player'),API=window.RADIO_API_URL||'';let state=read(),selected,player,ready=false,playing=false,last='',writeKey='',playRun=0,completedFrame='';
 function read(){try{let x=JSON.parse(localStorage.getItem(KEY));if(!x||x.version!==2||!x.settings||!x.slots)return fresh();x.settings=Object.assign({},fresh().settings,x.settings);return x}catch{return fresh()}}
 async function saveSettings(settings){
-  if(!writeKey){note('Введите ключ Cloudflare, чтобы сохранить общие настройки.',true);return false}
+  if(!writeKey){note('Введите ключ Cloudflare, чтобы сохранить общие настройки',true);return false}
   try{
     const response=await fetch(API,{
       method:'PUT',headers:{'Content-Type':'application/json','X-Radio-Key':writeKey},
@@ -12,10 +12,10 @@ async function saveSettings(settings){
     });
     if(!response.ok)throw Error();
     await remote(true);
-    note('Настройки сохранены.');
+    note('Настройки сохранены');
     return true;
   }catch{
-    note('Не удалось сохранить настройки. Проверьте ключ Cloudflare.',true);
+    note('Не удалось сохранить настройки — проверьте ключ Cloudflare',true);
     return false;
   }
 }
@@ -39,12 +39,12 @@ function remote(force=false){
       try{localStorage.setItem(KEY,JSON.stringify(state))}catch{}
       updateSchedule(snapshot.chats);
       tick();
-      if(refreshFailed&&$('#notice').textContent==='Не удалось обновить расписание.')note('');
+      if(refreshFailed&&$('#notice').textContent==='Не удалось обновить расписание')note('');
       refreshFailed=false;
     }catch{
       if(refreshing===request&&!refreshFailed){
         refreshFailed=true;
-        note('Не удалось обновить расписание.',true);
+        note('Не удалось обновить расписание',true);
       }
     }finally{
       if(refreshing===request)refreshing=null;
@@ -58,14 +58,18 @@ function now(date=new Date()){let zone=state.settings.timezone;try{new Intl.Date
 function fallback(){return{type:'program',url:state.settings.defaultUrl,originalTitle:state.settings.defaultTitle,userTitle:'',start:0,inherited:true}}function get(d,h){const slot=state.slots[k(d,h)],base=fallback();if(!slot)return base;if(slot.url)return {...slot};return {...slot,url:base.url,start:0,originalTitle:slot.originalTitle||base.originalTitle,inherited:true}}function name(x){return x.userTitle||x.originalTitle||''}function duration(x){return Math.max(1,Math.min(300,+x.idDuration||+state.settings.idDuration||30))}
 function frame(){let p=now(),x=get(p.day,p.hour),s=p.min*60+p.sec,id=duration(x);return s>=3600-id?{kind:'id',url:state.settings.idUrl,start:s-(3600-id),key:`id:${k(p.day,p.hour)}`,p}:{kind:'program',url:x.url,start:(+x.start||0)+s,key:`program:${k(p.day,p.hour)}:${x.url}`,p,x}}
 function isYT(u=''){return/(youtu\.be|youtube\.com)/i.test(u)}function vid(u=''){try{let x=new URL(u);return x.searchParams.get('v')||x.pathname.split('/').filter(Boolean).pop()}catch{return''}}
-function showSlotStatus(cell,program){
-  const label=cell.querySelector('.slot-author');
-  const status=program?.busy?'● Занято':'○ Свободно';
-  const text=[status,program?.author].filter(Boolean).join(' · ');
-  if(label.textContent!==text){
-    label.textContent=text;
-    label.title=text;
-  }
+function showSlotStatus(cell, program) {
+  const busy = Boolean(program?.busy);
+  const status = busy ? 'Занято' : 'Свободно';
+  const author = program?.author || '';
+  const label = cell.querySelector('.slot-author');
+  const dot = label.querySelector('.slot-status');
+  const credit = label.querySelector('.slot-credit');
+
+  dot.classList.toggle('is-busy', busy);
+  dot.setAttribute('aria-label', status);
+  if (credit.textContent !== author) credit.textContent = author;
+  label.title = author ? `${status} · ${author}` : status;
 }
 function draw(){
   const time=now(), root=$('#schedule');
@@ -76,7 +80,8 @@ function draw(){
     cell.className=hour===time.hour?'slot current':'slot';
     cell.dataset.key=key;
     cell.innerHTML=`<span class="slot-time">${String(hour).padStart(2,'0')}:00</span>
-      <strong class="slot-title"></strong><span class="slot-author"></span>
+      <strong class="slot-title"></strong>
+      <span class="slot-author"><span class="slot-status" role="img"></span><span class="slot-credit"></span></span>
       <div class="chat-area"><div class="chat-messages"></div>
       <textarea class="slot-chat" rows="2" maxlength="500" enterkeyhint="enter"
         aria-label="Комментарий. Сохраняется при выходе из поля"></textarea></div>`;
@@ -100,7 +105,7 @@ function draw(){
           await remote(true);
         }catch{
           chat.value=chat.value?draft+'\n'+chat.value:draft;
-          note('Комментарий не сохранён. Вернитесь в поле и попробуйте ещё раз.',true);
+          note('Комментарий не сохранён — вернитесь в поле и попробуйте ещё раз',true);
         }
       });
       return pending;
@@ -118,13 +123,20 @@ function updateSchedule(chats){
     if(chats)renderChat(key,cell.querySelector('.chat-messages'),chats[key]||[]);
   });
 }
-const commentMarks=['●','○','◆','◇','■','□','✦','✧','✶','✷','▲'];
-function commentMark(row){
-  // Keep the same mark for a saved comment in every browser.
-  const seed=row.id||`${row.time}:${row.text}`;
-  let hash=2166136261;
-  for(let i=0;i<seed.length;i++)hash=Math.imul(hash^seed.charCodeAt(i),16777619);
-  return commentMarks[(hash>>>0)%commentMarks.length];
+const avatarColors = ['#ff9a9e', '#91d7ff', '#b9a4f5', '#8fe0a4', '#ffb879', '#ef9bd4', '#f5dc62', '#71e0d1'];
+const avatarExpressions = ['smile', 'round', 'straight'];
+
+function commentAvatar(row) {
+  const seed = row.id || `${row.time}:${row.text}`;
+  let hash = 2166136261;
+  for (let i = 0; i < seed.length; i++) hash = Math.imul(hash ^ seed.charCodeAt(i), 16777619);
+  const value = hash >>> 0;
+  const avatar = document.createElement('span');
+  avatar.className = 'comment-avatar';
+  avatar.setAttribute('aria-hidden', 'true');
+  avatar.style.setProperty('--avatar-color', avatarColors[value % avatarColors.length]);
+  avatar.dataset.expression = avatarExpressions[Math.floor(value / avatarColors.length) % avatarExpressions.length];
+  return avatar;
 }
 const renderedChats=new WeakMap();
 function renderChat(key,el,rows){
@@ -134,10 +146,7 @@ function renderChat(key,el,rows){
   const items=document.createDocumentFragment();
   for(const row of rows){
     const item=document.createElement('p');
-    const mark=document.createElement('span');
-    mark.className='comment-mark';
-    mark.setAttribute('aria-hidden','true');
-    mark.textContent=commentMark(row);
+    const avatar = commentAvatar(row);
     const message=document.createElement('textarea');
     message.className='comment-edit';
     message.rows=1;
@@ -163,10 +172,10 @@ function renderChat(key,el,rows){
         row.text=text;
         delete message.dataset.dirty;
         await remote(true);
-      }catch{note('Правка комментария не сохранена. Вернитесь в поле и попробуйте ещё раз.',true)}
+      }catch{note('Изменения комментария не сохранены — вернитесь в поле и попробуйте ещё раз',true)}
       finally{message.readOnly=false}
     };
-    item.append(mark,message);
+    item.append(avatar,message);
     items.append(item);
     requestAnimationFrame(resize);
   }
@@ -206,9 +215,9 @@ async function updateSlot(method, slot){
     if(!response.ok)throw Error();
     if(selected===key)$('#editor').close();
     await remote(true);
-    note(clear?'Ячейка очищена.':'Программа сохранена.');
+    note(clear?'Ячейка очищена':'Программа сохранена');
   }catch{
-    editorError(clear?'Не удалось очистить ячейку.':'Не удалось сохранить программу.');
+    editorError(clear?'Не удалось очистить ячейку':'Не удалось сохранить программу');
   }finally{
     slotRequestPending=false;
   }
@@ -228,8 +237,8 @@ $('#editor-form').onsubmit=e=>{
 $('#clear-cell').onclick=()=>updateSlot('DELETE');
 $('#reset-radio').onclick=async event=>{
   const key=$('#settings-form').elements.writeKey.value.trim()||writeKey;
-  if(!key){window.alert('Введите ключ Cloudflare, чтобы выполнить сброс.');return}
-  if(window.prompt('Будут удалены все программы и комментарии. Музыка по умолчанию и джингл сохранятся. Для подтверждения введите СБРОС.')!=='СБРОС')return;
+  if(!key){window.alert('Введите ключ Cloudflare, чтобы выполнить сброс');return}
+  if(window.prompt('Будут удалены все программы и комментарии, музыка по умолчанию и джингл сохранятся\nДля подтверждения введите СБРОС')!=='СБРОС')return;
   const button=event.currentTarget;
   button.disabled=true;
   try{
@@ -241,13 +250,13 @@ $('#reset-radio').onclick=async event=>{
     writeKey=key;
     $('#settings').close();
     await remote(true);
-    note('Программы и комментарии сброшены.');
-  }catch{window.alert('Не удалось выполнить сброс. Проверьте ключ Cloudflare.')}
+    note('Программы и комментарии сброшены');
+  }catch{window.alert('Не удалось выполнить сброс — проверьте ключ Cloudflare')}
   finally{button.disabled=false}
 };
 function onProgramEnd(){let a=frame();if(!playing||a.kind!=='program'||last!==a.key||!a.x||a.x.inherited)return;completedFrame=a.key;last='';sync()}
 audio.onended=onProgramEnd;
-const youtubeLoadingMessage = 'YouTube-плеер загружается. Нажмите ▶, когда он будет готов.';
+const youtubeLoadingMessage = 'Нажмите ▶, когда YouTube-плеер загрузится';
 let youtubeSource;
 let manualYoutube;
 
@@ -263,7 +272,7 @@ function offerManualYoutube(source) {
   stopPlayback();
   manualYoutube = {source, frameKey};
   showYoutubePanel(true);
-  note('Нажмите ▶ в плеере YouTube, чтобы включить эфир.');
+  note('Нажмите ▶ в плеере YouTube, чтобы включить эфир');
   player.cueVideoById({videoId: vid(source.url), startSeconds: source.start});
   player.getIframe()?.focus();
 }
@@ -277,7 +286,7 @@ function handleYoutubeState(event) {
   manualYoutube = null;
   if (current.key !== frameKey) {
     stopPlayback();
-    note('Передача сменилась. Нажмите ▶ в шапке, чтобы включить эфир.');
+    note('Передача сменилась — нажмите ▶ в шапке, чтобы включить эфир');
     return;
   }
 
@@ -304,7 +313,7 @@ function inject() {
   script.onerror = () => {
     script.remove();
     if ($('#notice').textContent === youtubeLoadingMessage) {
-      note('Не удалось загрузить YouTube. Нажмите ▶, чтобы повторить.', true);
+      note('Не удалось загрузить YouTube — нажмите ▶, чтобы повторить', true);
     }
   };
   document.head.append(script);
@@ -320,14 +329,14 @@ window.onYouTubeIframeAPIReady = () => {
         allowPlayer();
         ready = true;
         if ($('#notice').textContent === youtubeLoadingMessage) {
-          note('YouTube-плеер готов. Нажмите ▶.');
+          note('YouTube-плеер готов к запуску — нажмите ▶');
         }
       },
       onStateChange: handleYoutubeState,
       onError: () => {
         if (manualYoutube || (playing && youtubeSource)) {
           stopPlayback();
-          note('Источник YouTube недоступен в этом браузере.', true);
+          note('Источник YouTube недоступен в этом браузере', true);
         }
       },
       onAutoplayBlocked: () => {
@@ -349,7 +358,7 @@ function sync() {
   if (source.key === last) return;
   last = source.key;
   if (!source.url) {
-    note('Не задан источник по умолчанию.', true);
+    note('Не задан источник по умолчанию', true);
     return;
   }
 
@@ -384,7 +393,7 @@ function sync() {
     seek();
   }
   audio.play().catch(() => {
-    if (playing && run === playRun && last === source.key) note('Нажмите Play, чтобы включить звук.');
+    if (playing && run === playRun && last === source.key) note('Нажмите Play, чтобы включить звук');
   });
 }
 
@@ -403,7 +412,7 @@ function tick(){
   });
   sync();
 }
-async function settings(){let password=window.prompt('Пароль для настроек');if(password===null)return;let bytes=new TextEncoder().encode(password),digest=await crypto.subtle.digest('SHA-256',bytes),hash=[...new Uint8Array(digest)].map(x=>x.toString(16).padStart(2,'0')).join('');if(hash!==SETTINGS_PASSWORD_HASH){note('Неверный пароль.',true);return}let f=$('#settings-form'),a;for(a in state.settings)if(f.elements[a])f.elements[a].value=state.settings[a];$('#settings').showModal()}$('#settings-button').onclick=settings;$('#settings-form').onsubmit=async e=>{if(e.submitter?.value==='cancel')return;e.preventDefault();let f=e.currentTarget,x=Object.fromEntries(new FormData(f));writeKey=x.writeKey||writeKey;delete x.writeKey;try{Intl.DateTimeFormat(undefined,{timeZone:x.timezone})}catch{note('Неизвестный часовой пояс.',true);return}x.idDuration=+x.idDuration;if(await saveSettings(x))$('#settings').close()};$('#export-data').onclick=()=>{let a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(state,null,2)],{type:'application/json'}));a.download='radio-schedule.json';a.click()};
+async function settings(){let password=window.prompt('Пароль для настроек');if(password===null)return;let bytes=new TextEncoder().encode(password),digest=await crypto.subtle.digest('SHA-256',bytes),hash=[...new Uint8Array(digest)].map(x=>x.toString(16).padStart(2,'0')).join('');if(hash!==SETTINGS_PASSWORD_HASH){note('Неверный пароль',true);return}let f=$('#settings-form'),a;for(a in state.settings)if(f.elements[a])f.elements[a].value=state.settings[a];$('#settings').showModal()}$('#settings-button').onclick=settings;$('#settings-form').onsubmit=async e=>{if(e.submitter?.value==='cancel')return;e.preventDefault();let f=e.currentTarget,x=Object.fromEntries(new FormData(f));writeKey=x.writeKey||writeKey;delete x.writeKey;try{Intl.DateTimeFormat(undefined,{timeZone:x.timezone})}catch{note('Неизвестный часовой пояс',true);return}x.idDuration=+x.idDuration;if(await saveSettings(x))$('#settings').close()};$('#export-data').onclick=()=>{let a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(state,null,2)],{type:'application/json'}));a.download='radio-schedule.json';a.click()};
 function stopPlayback() {
   playing = false;
   youtubeSource = null;
@@ -442,4 +451,4 @@ function toggle() {
   sync();
 }
 
-let playButton=$('#play');if(playButton)playButton.onclick=toggle;document.addEventListener('keydown',e=>{if(e.key.toLowerCase()==='s'&&e.altKey){e.preventDefault();settings()}});try{draw();inject();tick();remote();setInterval(tick,500);setInterval(()=>remote(),15000);window.addEventListener('focus',()=>remote());document.addEventListener('visibilitychange',()=>{if(!document.hidden)remote()})}catch(error){console.error(error);note('Не удалось загрузить расписание. Очистите сохранённые данные сайта и обновите страницу.',true)}
+let playButton=$('#play');if(playButton)playButton.onclick=toggle;document.addEventListener('keydown',e=>{if(e.key.toLowerCase()==='s'&&e.altKey){e.preventDefault();settings()}});try{draw();inject();tick();remote();setInterval(tick,500);setInterval(()=>remote(),15000);window.addEventListener('focus',()=>remote());document.addEventListener('visibilitychange',()=>{if(!document.hidden)remote()})}catch(error){console.error(error);note('Не удалось загрузить расписание — очистите сохранённые данные сайта и обновите страницу',true)}
