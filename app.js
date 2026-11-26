@@ -7,6 +7,16 @@ function now(date=new Date()){let zone=state.settings.timezone;try{new Intl.Date
 function fallback(){return{type:'program',url:state.settings.defaultUrl,originalTitle:state.settings.defaultTitle,userTitle:'',start:0,inherited:true}}function get(d,h){return Object.assign({},state.slots[k(d,h)]||fallback())}function name(x){return x.userTitle||x.originalTitle||''}function duration(x){return Math.max(1,Math.min(300,+x.idDuration||+state.settings.idDuration||30))}
 function frame(){let p=now(),x=get(p.day,p.hour),s=p.min*60+p.sec,id=duration(x);return s>=3600-id?{kind:'id',url:state.settings.idUrl,start:s-(3600-id),key:`id:${k(p.day,p.hour)}`,p}:{kind:'program',url:x.url,start:(+x.start||0)+s,key:`program:${k(p.day,p.hour)}:${x.url}`,p,x}}
 function isYT(u=''){return/(youtu\.be|youtube\.com)/i.test(u)}function vid(u=''){try{let x=new URL(u);return x.searchParams.get('v')||x.pathname.split('/').filter(Boolean).pop()}catch{return''}}
+function showSlotStatus(cell,program,at=Date.now()){
+  const label=cell.querySelector('.slot-author');
+  let status='○ Свободно';
+  if(program)status=program.lockUntil>at?'● Занято':'○ Изменить';
+  const text=program?.author?`${status} · ${program.author}`:status;
+  if(label.textContent!==text){
+    label.textContent=text;
+    label.title=text;
+  }
+}
 function draw(){
   const time=now(), root=$('#schedule');
   root.textContent='';
@@ -21,8 +31,7 @@ function draw(){
       <textarea class="slot-chat" rows="2" maxlength="500" enterkeyhint="enter"
         aria-label="Комментарий. Сохраняется при выходе из поля"></textarea></div>`;
     cell.querySelector('.slot-title').textContent=name(program);
-    const status=program.lockUntil>Date.now()?'● Занято':'○ Свободно';
-    cell.querySelector('.slot-author').textContent=program.author?`${status} · ${program.author}`:status;
+    showSlotStatus(cell,state.slots[key]);
     const chat=cell.querySelector('.slot-chat'), messages=cell.querySelector('.chat-messages');
     chat.placeholder=program.author?'Написать: '+program.author:'Написать комментарий';
     cell.onclick=event=>{if(!event.target.closest('.chat-area'))edit(key)};
@@ -170,6 +179,21 @@ function onProgramEnd(){let a=frame();if(!playing||a.kind!=='program'||last!==a.
 audio.onended=onProgramEnd;
 function allowPlayer(){if(!player)return;let f=player.getIframe&&player.getIframe();if(f)f.setAttribute('allow','autoplay; encrypted-media; fullscreen; picture-in-picture')}function inject(){if(document.querySelector('[data-yt]'))return;let s=document.createElement('script');s.src='https://www.youtube.com/iframe_api';s.dataset.yt='';document.head.append(s)}window.onYouTubeIframeAPIReady=()=>{player=new YT.Player('youtube-player',{height:'200',width:'200',playerVars:{playsinline:1,controls:0,rel:0,enablejsapi:1,origin:location.origin},events:{onReady:()=>{allowPlayer();ready=true;last='';sync()},onStateChange:e=>{if(e.data===0)onProgramEnd()},onError:()=>note('Источник YouTube недоступен в этом браузере.',true),onAutoplayBlocked:()=>note('Браузер заблокировал запуск. Нажмите Play ещё раз.',true)}});allowPlayer()};
 function sync(){if(!playing)return;let a=frame(),run=playRun;if(completedFrame&&completedFrame!==a.key)completedFrame='';if(completedFrame===a.key&&a.kind==='program')a={kind:'fallback',url:state.settings.defaultUrl,start:0,key:'fallback:'+a.key};if(a.key===last)return;last=a.key;if(!a.url){note('Не задан источник по умолчанию.',true);return}if(isYT(a.url)){audio.onloadedmetadata=null;audio.pause();inject();if(ready){player.loadVideoById({videoId:vid(a.url),startSeconds:a.start});player.playVideo()}}else{if(ready)player.stopVideo();let seek=function(){if(playing&&run===playRun)try{audio.currentTime=a.start}catch(e){}};if(audio.src!==new URL(a.url,location.href).href){audio.onloadedmetadata=seek;audio.src=a.url;audio.load();audio.play().catch(()=>note('Нажмите Play, чтобы включить звук.'))}else{seek();audio.play().catch(()=>note('Нажмите Play, чтобы включить звук.'))}}}
-function tick(){let p=now(),s=p.min*60+p.sec;$('#clock').textContent=new Intl.DateTimeFormat('ru-RU',{timeZone:state.settings.timezone,hour:'2-digit',minute:'2-digit',second:'2-digit',hourCycle:'h23'}).format(new Date());$('#current-title').textContent=name(get(p.day,p.hour));$('#to-hour').textContent=`${String(Math.floor((3600-s)/60)).padStart(2,'0')}:${String((3600-s)%60).padStart(2,'0')}`;document.querySelectorAll('.slot.current').forEach(x=>x.classList.remove('current'));let e=$(`.slot[data-key="${k(p.day,p.hour)}"]`);if(e)e.classList.add('current');sync()}
+function tick(){
+  const current=now(), seconds=current.min*60+current.sec;
+  $('#clock').textContent=new Intl.DateTimeFormat('ru-RU',{
+    timeZone:state.settings.timezone,hour:'2-digit',minute:'2-digit',second:'2-digit',hourCycle:'h23'
+  }).format(new Date());
+  $('#current-title').textContent=name(get(current.day,current.hour));
+  const remaining=3600-seconds;
+  $('#to-hour').textContent=`${String(Math.floor(remaining/60)).padStart(2,'0')}:${String(remaining%60).padStart(2,'0')}`;
+  const at=Date.now(), currentKey=k(current.day,current.hour);
+  document.querySelectorAll('#schedule .slot').forEach(cell=>{
+    const key=cell.dataset.key;
+    cell.classList.toggle('current',key===currentKey);
+    showSlotStatus(cell,state.slots[key],at);
+  });
+  sync();
+}
 async function settings(){let password=window.prompt('Пароль для настроек');if(password===null)return;let bytes=new TextEncoder().encode(password),digest=await crypto.subtle.digest('SHA-256',bytes),hash=[...new Uint8Array(digest)].map(x=>x.toString(16).padStart(2,'0')).join('');if(hash!==SETTINGS_PASSWORD_HASH){note('Неверный пароль.',true);return}let f=$('#settings-form'),a;for(a in state.settings)if(f.elements[a])f.elements[a].value=state.settings[a];$('#settings').showModal()}$('#settings-button').onclick=settings;$('#settings-form').onsubmit=e=>{if(e.submitter?.value==='cancel')return;e.preventDefault();let f=e.currentTarget,x=Object.fromEntries(new FormData(f));writeKey=x.writeKey||writeKey;delete x.writeKey;try{Intl.DateTimeFormat(undefined,{timeZone:x.timezone})}catch{note('Неизвестный часовой пояс.',true);return}x.idDuration=+x.idDuration;state.settings=x;save();$('#settings').close();draw();last='';sync()};$('#export-data').onclick=()=>{let a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(state,null,2)],{type:'application/json'}));a.download='radio-schedule.json';a.click()};
 function toggle(){let b=$('#play');if(playing){playing=false;playRun++;last='';audio.onloadedmetadata=null;audio.pause();audio.removeAttribute('src');audio.load();if(ready&&player)player.stopVideo();if(b)b.textContent='▶';return}playing=true;playRun++;last='';if(b)b.textContent='❚❚';sync()}let playButton=$('#play');if(playButton)playButton.onclick=toggle;document.addEventListener('keydown',e=>{if(e.key.toLowerCase()==='s'&&e.altKey){e.preventDefault();settings()}});try{draw();inject();tick();remote();setInterval(tick,500)}catch(error){console.error(error);note('Не удалось загрузить расписание. Очистите сохранённые данные сайта и обновите страницу.',true)}
