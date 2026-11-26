@@ -64,11 +64,13 @@ function showSlotStatus(cell, program) {
   const author = program?.author || '';
   const label = cell.querySelector('.slot-author');
   const dot = label.querySelector('.slot-status');
+  const stateLabel = label.querySelector('.slot-state');
   const credit = label.querySelector('.slot-credit');
+  const creditText = author ? `· ${author}` : '';
 
   dot.classList.toggle('is-busy', busy);
-  dot.setAttribute('aria-label', status);
-  if (credit.textContent !== author) credit.textContent = author;
+  if (stateLabel.textContent !== status) stateLabel.textContent = status;
+  if (credit.textContent !== creditText) credit.textContent = creditText;
   label.title = author ? `${status} · ${author}` : status;
 }
 function draw(){
@@ -81,7 +83,7 @@ function draw(){
     cell.dataset.key=key;
     cell.innerHTML=`<span class="slot-time">${String(hour).padStart(2,'0')}:00</span>
       <strong class="slot-title"></strong>
-      <span class="slot-author"><span class="slot-status" role="img"></span><span class="slot-credit"></span></span>
+      <span class="slot-author"><span class="slot-status" aria-hidden="true"></span><span class="slot-state"></span><span class="slot-credit"></span></span>
       <div class="chat-area"><div class="chat-messages"></div>
       <textarea class="slot-chat" rows="2" maxlength="500" enterkeyhint="enter"
         aria-label="Комментарий. Сохраняется при выходе из поля"></textarea></div>`;
@@ -123,19 +125,19 @@ function updateSchedule(chats){
     if(chats)renderChat(key,cell.querySelector('.chat-messages'),chats[key]||[]);
   });
 }
-const avatarColors = ['#ff9a9e', '#91d7ff', '#b9a4f5', '#8fe0a4', '#ffb879', '#ef9bd4', '#f5dc62', '#71e0d1'];
-const avatarExpressions = ['smile', 'round', 'straight'];
+const commentAvatars = [
+  '🐈', '🐕', '🐇', '🐿️', '🦔', '🐢', '🐙', '🐧', '🦜', '🦦', '🦩', '🦥',
+  '🚶', '🏃', '🕺', '💃', '🧘', '🤸', '🏄', '🚴'
+];
 
 function commentAvatar(row) {
-  const seed = row.id || `${row.time}:${row.text}`;
+  const seed = String(row.id || `${row.time}:${row.text}`);
   let hash = 2166136261;
   for (let i = 0; i < seed.length; i++) hash = Math.imul(hash ^ seed.charCodeAt(i), 16777619);
-  const value = hash >>> 0;
   const avatar = document.createElement('span');
   avatar.className = 'comment-avatar';
   avatar.setAttribute('aria-hidden', 'true');
-  avatar.style.setProperty('--avatar-color', avatarColors[value % avatarColors.length]);
-  avatar.dataset.expression = avatarExpressions[Math.floor(value / avatarColors.length) % avatarExpressions.length];
+  avatar.textContent = commentAvatars[(hash >>> 0) % commentAvatars.length];
   return avatar;
 }
 const renderedChats=new WeakMap();
@@ -259,10 +261,6 @@ audio.onended=onProgramEnd;
 const youtubeLoadingMessage = 'Нажмите ▶, когда YouTube-плеер загрузится';
 let youtubeSource;
 
-function allowPlayer() {
-  const iframe = player?.getIframe?.();
-  if (iframe) iframe.setAttribute('allow', 'autoplay; encrypted-media; fullscreen; picture-in-picture');
-}
 
 function inject() {
   if (document.querySelector('[data-yt]')) return;
@@ -279,13 +277,24 @@ function inject() {
 }
 
 window.onYouTubeIframeAPIReady = () => {
-  player = new YT.Player('youtube-player', {
-    height: '200',
-    width: '200',
-    playerVars: {playsinline: 1, controls: 1, rel: 0, enablejsapi: 1, origin: location.origin},
+  const embed = new URL('https://www.youtube.com/embed/');
+  embed.search = new URLSearchParams({
+    enablejsapi: '1', origin: location.origin, playsinline: '1', controls: '1', rel: '0'
+  }).toString();
+
+  const iframe = document.createElement('iframe');
+  iframe.id = 'youtube-player';
+  iframe.title = 'Плеер YouTube';
+  iframe.width = '200';
+  iframe.height = '200';
+  iframe.tabIndex = -1;
+  iframe.allow = 'autoplay; encrypted-media; fullscreen; picture-in-picture';
+  iframe.src = embed.href;
+  $('#youtube-player').replaceWith(iframe);
+
+  player = new YT.Player(iframe, {
     events: {
       onReady: () => {
-        allowPlayer();
         ready = true;
         if ($('#notice').textContent === youtubeLoadingMessage) {
           note('YouTube-плеер готов к запуску — нажмите ▶');
@@ -294,10 +303,10 @@ window.onYouTubeIframeAPIReady = () => {
       onStateChange: event => {
         if (event.data === 0) onProgramEnd();
       },
-      onError: () => {
+      onError: event => {
         if (playing && youtubeSource) {
           stopPlayback();
-          note('Источник YouTube недоступен в этом браузере', true);
+          note(`Источник YouTube недоступен в этом браузере (код ${event.data})`, true);
         }
       },
       onAutoplayBlocked: () => {
@@ -308,7 +317,6 @@ window.onYouTubeIframeAPIReady = () => {
       }
     }
   });
-  allowPlayer();
 };
 
 function sync() {
