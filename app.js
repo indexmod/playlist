@@ -247,8 +247,108 @@ $('#reset-radio').onclick=async event=>{
 };
 function onProgramEnd(){let a=frame();if(!playing||a.kind!=='program'||last!==a.key||!a.x||a.x.inherited)return;completedFrame=a.key;last='';sync()}
 audio.onended=onProgramEnd;
-function allowPlayer(){if(!player)return;let f=player.getIframe&&player.getIframe();if(f)f.setAttribute('allow','autoplay; encrypted-media; fullscreen; picture-in-picture')}function inject(){if(document.querySelector('[data-yt]'))return;let s=document.createElement('script');s.src='https://www.youtube.com/iframe_api';s.dataset.yt='';document.head.append(s)}window.onYouTubeIframeAPIReady=()=>{player=new YT.Player('youtube-player',{height:'200',width:'200',playerVars:{playsinline:1,controls:0,rel:0,enablejsapi:1,origin:location.origin},events:{onReady:()=>{allowPlayer();ready=true;last='';sync()},onStateChange:e=>{if(e.data===0)onProgramEnd()},onError:()=>note('Источник YouTube недоступен в этом браузере.',true),onAutoplayBlocked:()=>note('Браузер заблокировал запуск. Нажмите Play ещё раз.',true)}});allowPlayer()};
-function sync(){if(!playing)return;let a=frame(),run=playRun;if(completedFrame&&completedFrame!==a.key)completedFrame='';if(completedFrame===a.key&&a.kind==='program')a={kind:'fallback',url:state.settings.defaultUrl,start:0,key:'fallback:'+a.key};if(a.key===last)return;last=a.key;if(!a.url){note('Не задан источник по умолчанию.',true);return}if(isYT(a.url)){audio.onloadedmetadata=null;audio.pause();inject();if(ready){player.loadVideoById({videoId:vid(a.url),startSeconds:a.start});player.playVideo()}}else{if(ready)player.stopVideo();let seek=function(){if(playing&&run===playRun)try{audio.currentTime=a.start}catch(e){}};if(audio.src!==new URL(a.url,location.href).href){audio.onloadedmetadata=seek;audio.src=a.url;audio.load();audio.play().catch(()=>note('Нажмите Play, чтобы включить звук.'))}else{seek();audio.play().catch(()=>note('Нажмите Play, чтобы включить звук.'))}}}
+const youtubeLoadingMessage = 'YouTube-плеер загружается. Нажмите ▶, когда он будет готов.';
+const youtubeBlockedMessage = 'Браузер заблокировал запуск. Нажмите ▶ ещё раз.';
+
+function allowPlayer() {
+  const iframe = player?.getIframe?.();
+  if (iframe) iframe.setAttribute('allow', 'autoplay; encrypted-media; fullscreen; picture-in-picture');
+}
+
+function inject() {
+  if (document.querySelector('[data-yt]')) return;
+  const script = document.createElement('script');
+  script.src = 'https://www.youtube.com/iframe_api';
+  script.dataset.yt = '';
+  script.onerror = () => {
+    script.remove();
+    if ($('#notice').textContent === youtubeLoadingMessage) {
+      note('Не удалось загрузить YouTube. Нажмите ▶, чтобы повторить.', true);
+    }
+  };
+  document.head.append(script);
+}
+
+window.onYouTubeIframeAPIReady = () => {
+  player = new YT.Player('youtube-player', {
+    height: '200',
+    width: '200',
+    playerVars: {playsinline: 1, controls: 0, rel: 0, enablejsapi: 1, origin: location.origin},
+    events: {
+      onReady: () => {
+        allowPlayer();
+        ready = true;
+        if ($('#notice').textContent === youtubeLoadingMessage) {
+          note('YouTube-плеер готов. Нажмите ▶.');
+        }
+      },
+      onStateChange: event => {
+        if (event.data === 0) onProgramEnd();
+      },
+      onError: () => {
+        if (playing && isYT(frame().url)) {
+          stopPlayback();
+          note('Источник YouTube недоступен в этом браузере.', true);
+        }
+      },
+      onAutoplayBlocked: () => {
+        if (playing && isYT(frame().url)) {
+          stopPlayback();
+          note(youtubeBlockedMessage, true);
+        }
+      }
+    }
+  });
+  allowPlayer();
+};
+
+function sync() {
+  if (!playing) return;
+  let source = frame();
+  const run = playRun;
+  if (completedFrame && completedFrame !== source.key) completedFrame = '';
+  if (completedFrame === source.key && source.kind === 'program') {
+    source = {kind: 'fallback', url: state.settings.defaultUrl, start: 0, key: 'fallback:' + source.key};
+  }
+  if (source.key === last) return;
+  last = source.key;
+  if (!source.url) {
+    note('Не задан источник по умолчанию.', true);
+    return;
+  }
+
+  if (isYT(source.url)) {
+    if (!ready) {
+      stopPlayback();
+      note(youtubeLoadingMessage);
+      inject();
+      return;
+    }
+    audio.onloadedmetadata = null;
+    audio.pause();
+    player.loadVideoById({videoId: vid(source.url), startSeconds: source.start});
+    return;
+  }
+
+  if (ready) player.stopVideo();
+  const seek = () => {
+    if (playing && run === playRun) {
+      try { audio.currentTime = source.start; } catch {}
+    }
+  };
+  const url = new URL(source.url, location.href).href;
+  if (audio.src !== url) {
+    audio.onloadedmetadata = seek;
+    audio.src = url;
+    audio.load();
+  } else {
+    seek();
+  }
+  audio.play().catch(() => {
+    if (playing && run === playRun && last === source.key) note('Нажмите Play, чтобы включить звук.');
+  });
+}
+
 function tick(){
   const current=now(), seconds=current.min*60+current.sec;
   $('#clock').textContent=new Intl.DateTimeFormat('ru-RU',{
@@ -265,4 +365,38 @@ function tick(){
   sync();
 }
 async function settings(){let password=window.prompt('Пароль для настроек');if(password===null)return;let bytes=new TextEncoder().encode(password),digest=await crypto.subtle.digest('SHA-256',bytes),hash=[...new Uint8Array(digest)].map(x=>x.toString(16).padStart(2,'0')).join('');if(hash!==SETTINGS_PASSWORD_HASH){note('Неверный пароль.',true);return}let f=$('#settings-form'),a;for(a in state.settings)if(f.elements[a])f.elements[a].value=state.settings[a];$('#settings').showModal()}$('#settings-button').onclick=settings;$('#settings-form').onsubmit=async e=>{if(e.submitter?.value==='cancel')return;e.preventDefault();let f=e.currentTarget,x=Object.fromEntries(new FormData(f));writeKey=x.writeKey||writeKey;delete x.writeKey;try{Intl.DateTimeFormat(undefined,{timeZone:x.timezone})}catch{note('Неизвестный часовой пояс.',true);return}x.idDuration=+x.idDuration;if(await saveSettings(x))$('#settings').close()};$('#export-data').onclick=()=>{let a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(state,null,2)],{type:'application/json'}));a.download='radio-schedule.json';a.click()};
-function toggle(){let b=$('#play');if(playing){playing=false;playRun++;last='';audio.onloadedmetadata=null;audio.pause();audio.removeAttribute('src');audio.load();if(ready&&player)player.stopVideo();if(b)b.textContent='▶';return}playing=true;playRun++;last='';if(b)b.textContent='❚❚';sync()}let playButton=$('#play');if(playButton)playButton.onclick=toggle;document.addEventListener('keydown',e=>{if(e.key.toLowerCase()==='s'&&e.altKey){e.preventDefault();settings()}});try{draw();inject();tick();remote();setInterval(tick,500);setInterval(()=>remote(),15000);window.addEventListener('focus',()=>remote());document.addEventListener('visibilitychange',()=>{if(!document.hidden)remote()})}catch(error){console.error(error);note('Не удалось загрузить расписание. Очистите сохранённые данные сайта и обновите страницу.',true)}
+function stopPlayback() {
+  playing = false;
+  playRun++;
+  last = '';
+  audio.onloadedmetadata = null;
+  audio.pause();
+  audio.removeAttribute('src');
+  audio.load();
+  if (ready) player.stopVideo();
+  const button = $('#play');
+  if (button) button.textContent = '▶';
+}
+
+function toggle() {
+  if (playing) {
+    stopPlayback();
+    return;
+  }
+
+  if (isYT(frame().url) && !ready) {
+    note(youtubeLoadingMessage);
+    inject();
+    return;
+  }
+
+  note('');
+  playing = true;
+  playRun++;
+  last = '';
+  const button = $('#play');
+  if (button) button.textContent = '❚❚';
+  sync();
+}
+
+let playButton=$('#play');if(playButton)playButton.onclick=toggle;document.addEventListener('keydown',e=>{if(e.key.toLowerCase()==='s'&&e.altKey){e.preventDefault();settings()}});try{draw();inject();tick();remote();setInterval(tick,500);setInterval(()=>remote(),15000);window.addEventListener('focus',()=>remote());document.addEventListener('visibilitychange',()=>{if(!document.hidden)remote()})}catch(error){console.error(error);note('Не удалось загрузить расписание. Очистите сохранённые данные сайта и обновите страницу.',true)}
