@@ -84,7 +84,23 @@ function editorError(message=''){
   error.textContent=message;
   error.hidden=!message;
 }
-function edit(key){
+let openingEditor=false;
+async function edit(key){
+  if(openingEditor||$('#editor').open)return;
+  openingEditor=true;
+  try{
+    if(API){
+      const response=await fetch(API,{cache:'no-store'});
+      if(response.ok){
+        const schedule=await response.json();
+        if(schedule.version===2&&schedule.slots)state.slots=schedule.slots;
+      }
+    }
+  }catch{
+    // Open the last known entry if a fresh copy is temporarily unavailable.
+  }finally{
+    openingEditor=false;
+  }
   selected=key;
   const x=state.slots[key]||fallback(), h=Number(key)%24, form=$('#editor-form');
   editingRevision=x.revision||'';
@@ -95,6 +111,9 @@ function edit(key){
   form.start.value=x.start||0;
   $('#original-title').textContent=x.originalTitle?'Исходное: '+x.originalTitle:'';
   $('#clear-cell').hidden=!state.slots[key];
+  const hint=$('#editor-hint');
+  hint.hidden=!state.slots[key]||x.lockUntil>Date.now();
+  hint.textContent=hint.hidden?'':'Час свободен. Чтобы занять его, сохраните новую программу.';
   editorError();
   $('#editor').showModal();
 }
@@ -111,11 +130,17 @@ async function updateSlot(method, slot){
       method,headers,body:JSON.stringify({token:visitorToken(),revision,slot})
     });
     if(response.status===403){
-      editorError('Очистить карточку можно из браузера, в котором её сохранили.');
+      const previous=state.slots[key];
+      editorError(previous&&!(previous.lockUntil>Date.now())
+        ? 'Очистить старую запись может её автор. Час свободен: сохраните свою программу вместо неё.'
+        : 'Очистить карточку можно из браузера, в котором её сохранили.');
       return;
     }
     if(response.status===409){
-      editorError(clear?'Запись изменилась. Откройте ячейку заново.':'Ячейку занял другой слушатель или запись изменилась. Выберите другую ячейку или откройте эту заново.');
+      const result=await response.json().catch(()=>({}));
+      editorError(result.error==='locked'
+        ? 'Час пока занят другим слушателем.'
+        : 'Расписание обновилось. Откройте карточку заново, чтобы увидеть актуальную запись.');
       remote();
       return;
     }

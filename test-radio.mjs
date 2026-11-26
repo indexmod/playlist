@@ -38,5 +38,16 @@ assert.equal(claimed.author,'');
 assert.ok(claimed.lockUntil>Date.now());
 assert.equal((await req('/slots/50','PUT',{...first,token:'b'.repeat(64),revision:claimed.revision})).status,409);
 assert.equal((await req('/slots/50','PUT',{...first,token:'b'.repeat(64),revision:claimed.revision},adminHeaders)).status,409);
-assert.equal((await req('/slots/50','DELETE',{token:first.token,revision:claimed.revision})).status,200);
+const realNow=Date.now;
+try{
+  Date.now=()=>claimed.lockUntil+1000;
+  const nextVisitor={...first,token:'b'.repeat(64),revision:claimed.revision};
+  assert.equal((await req('/slots/50','DELETE',nextVisitor)).status,403);
+  assert.equal((await req('/slots/50','PUT',nextVisitor)).status,200);
+  const replacement=await readSlot('50');
+  assert.equal(replacement.author,first.slot.author);
+  assert.equal((await req('/slots/50','DELETE',{token:first.token,revision:replacement.revision})).status,403);
+}finally{
+  Date.now=realNow;
+}
 console.log('Schedule import, claims, conflicts, chat and owner-only deletion passed');
