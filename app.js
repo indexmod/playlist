@@ -85,36 +85,45 @@ function draw(){
       <strong class="slot-title"></strong>
       <span class="slot-author"><span class="slot-status" aria-hidden="true"></span><span class="slot-state"></span><span class="slot-credit"></span></span>
       <div class="chat-area"><div class="chat-messages"></div>
-      <textarea class="slot-chat" rows="2" maxlength="500" enterkeyhint="enter"
-        aria-label="Комментарий. Сохраняется при выходе из поля"></textarea></div>`;
+      <textarea class="slot-chat" rows="2" maxlength="500" enterkeyhint="send"
+        aria-label="Комментарий — Enter для отправки"></textarea></div>`;
     cell.querySelector('.slot-title').textContent=name(program);
     showSlotStatus(cell,state.slots[key]);
     const chat=cell.querySelector('.slot-chat');
     chat.placeholder=program.author?'Написать: '+program.author:'Написать комментарий';
     cell.onclick=event=>{if(!event.target.closest('.chat-area'))edit(key)};
-    let pending=Promise.resolve();
-    chat.onblur=()=>{
-      const draft=chat.value, message=draft.trim();
-      if(!message)return;
-      chat.value='';
-      pending=pending.then(async()=>{
-        try{
-          const response=await fetch(API+'chat/'+key,{
-            method:'POST',headers:{'Content-Type':'application/json'},
-            body:JSON.stringify({text:message}),keepalive:true
-          });
-          if(!response.ok)throw Error();
-          await remote(true);
-        }catch{
-          chat.value=chat.value?draft+'\n'+chat.value:draft;
-          note('Комментарий не сохранён — вернитесь в поле и попробуйте ещё раз',true);
-        }
-      });
-      return pending;
+    chat.onkeydown = event => {
+      if (event.key !== 'Enter' || event.shiftKey || event.isComposing || event.keyCode === 229) return;
+      event.preventDefault();
+      if (!event.repeat) sendComment(key, chat);
     };
     root.append(cell);
   }
 }
+async function sendComment(key, composer) {
+  if (composer.readOnly) return;
+  const text = composer.value.trim();
+  if (!text) return;
+
+  composer.readOnly = true;
+  try {
+    const response = await fetch(API + 'chat/' + key, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({text}),
+      keepalive: true
+    });
+    if (!response.ok) throw Error();
+    composer.value = '';
+    if ($('#notice').textContent === 'Комментарий не сохранён — нажмите Enter, чтобы повторить') note('');
+    remote(true);
+  } catch {
+    note('Комментарий не сохранён — нажмите Enter, чтобы повторить', true);
+  } finally {
+    composer.readOnly = false;
+  }
+}
+
 function updateSchedule(chats){
   document.querySelectorAll('#schedule .slot').forEach(cell=>{
     const key=cell.dataset.key, program=state.slots[key];
@@ -140,11 +149,14 @@ function commentAvatar(row) {
   avatar.textContent = commentAvatars[(hash >>> 0) % commentAvatars.length];
   return avatar;
 }
-const renderedChats=new WeakMap();
+const renderedChats = new WeakMap();
 function renderChat(key,el,rows){
-  const content=JSON.stringify(rows);
-  if(renderedChats.get(el)===content||el.matches(':focus-within')||el.querySelector('[data-dirty]'))return;
-  renderedChats.set(el,content);
+  const content = JSON.stringify(rows);
+  const previous = renderedChats.get(el);
+  if (previous?.content === content || el.matches(':focus-within') || el.querySelector('[data-dirty]')) return;
+  renderedChats.set(el, {content, count: rows.length});
+  const scrollToLatest = rows.length > (previous?.count ?? 0);
+  const messages = [];
   const items=document.createDocumentFragment();
   for(const row of rows){
     const item=document.createElement('p');
@@ -179,9 +191,17 @@ function renderChat(key,el,rows){
     };
     item.append(avatar,message);
     items.append(item);
-    requestAnimationFrame(resize);
+    messages.push(message);
   }
   el.replaceChildren(items);
+  requestAnimationFrame(() => {
+    if (renderedChats.get(el)?.content !== content) return;
+    const heights = messages.map(message => message.scrollHeight);
+    messages.forEach((message, index) => {
+      message.style.height = heights[index] + 'px';
+    });
+    if (scrollToLatest) el.scrollTop = el.scrollHeight;
+  });
 }
 let authorLabel=document.createElement('label');authorLabel.textContent='Автор или рубрика (необязательно)';let authorInput=document.createElement('input');authorInput.name='author';authorInput.maxLength=80;authorInput.placeholder='Имя, рубрика или оба';authorLabel.append(authorInput);$('#editor-form').insertBefore(authorLabel,$('#original-title'));
 function editorError(message=''){
@@ -189,10 +209,17 @@ function editorError(message=''){
   error.textContent=message;
   error.hidden=!message;
 }
+const slotWrites = new Set();
+const unsavedSlots = new Map();
+
 function edit(key){
   if($('#editor').open)return;
+  if (slotWrites.has(key)) {
+    note('Эта ячейка ещё сохраняется');
+    return;
+  }
   selected=key;
-  const x=state.slots[key]||{}, h=Number(key)%24, form=$('#editor-form');
+  const x=unsavedSlots.get(key)||state.slots[key]||{}, h=Number(key)%24, form=$('#editor-form');
   $('#editor-heading').textContent=`${String(h).padStart(2,'0')}:00`;
   form.url.value=x.url||'';
   form.userTitle.value=x.userTitle||'';
@@ -204,35 +231,60 @@ function edit(key){
   editorError();
   $('#editor').showModal();
 }
-let slotRequestPending=false;
-async function updateSlot(method, slot){
-  if(slotRequestPending)return;
-  const key=selected, clear=method==='DELETE';
-  slotRequestPending=true;
-  editorError();
-  try{
-    const response=await fetch(API+'slots/'+key,{
-      method,...(clear?{}:{headers:{'Content-Type':'application/json'},body:JSON.stringify({slot})})
+async function updateSlot(method, slot) {
+  const key = selected;
+  if (slotWrites.has(key)) return;
+
+  const clear = method === 'DELETE';
+  slotWrites.add(key);
+  $('#editor').close();
+  note(clear ? 'Очищаем ячейку' : 'Сохраняем программу');
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 12000);
+  try {
+    const response = await fetch(API + 'slots/' + key, {
+      method,
+      signal: controller.signal,
+      ...(clear ? {} : {headers: {'Content-Type': 'application/json'}, body: JSON.stringify({slot})})
     });
-    if(!response.ok)throw Error();
-    if(selected===key)$('#editor').close();
-    await remote(true);
-    note(clear?'Ячейка очищена':'Программа сохранена');
-  }catch{
-    editorError(clear?'Не удалось очистить ячейку':'Не удалось сохранить программу');
-  }finally{
-    slotRequestPending=false;
+    if (!response.ok) throw Error();
+
+    unsavedSlots.delete(key);
+    if (clear) delete state.slots[key];
+    else state.slots[key] = {...slot, type: 'program'};
+    updateSchedule();
+    tick();
+    note(clear ? 'Ячейка очищена' : 'Программа сохранена');
+    remote(true);
+  } catch {
+    if (!clear) unsavedSlots.set(key, slot);
+    note(clear ? 'Не удалось очистить ячейку' : 'Не удалось сохранить программу — откройте ячейку, чтобы повторить', true);
+  } finally {
+    clearTimeout(timeout);
+    slotWrites.delete(key);
   }
 }
 $('#editor-form').onsubmit=e=>{
   if(e.submitter?.value==='cancel')return;
   e.preventDefault();
-  const form=e.currentTarget, old=state.slots[selected]||{}, url=form.url.value.trim();
+  const form=e.currentTarget, old=state.slots[selected]||{};
+  let url = form.url.value.trim();
+  if (url) {
+    try {
+      const parsed = new URL(url);
+      if (!['https:', 'http:'].includes(parsed.protocol)) throw Error();
+      url = parsed.href;
+    } catch {
+      editorError('Укажите ссылку, которая начинается с https:// или http://');
+      return;
+    }
+  }
   const slot={
     url,userTitle:form.userTitle.value.trim(),author:form.elements.author.value.trim(),
     busy:form.elements.busy.value==='busy',
     originalTitle:(old.url===url&&old.originalTitle)||(url?(isYT(url)?'YouTube':'Аудио'):''),
-    start:Number(form.start.value)||0
+    start:Math.max(0,Number(form.start.value)||0)
   };
   updateSlot('PUT',slot);
 };
