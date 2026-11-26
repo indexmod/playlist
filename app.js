@@ -411,6 +411,7 @@ function sync() {
   if (source.key === last) return;
   last = source.key;
   if (!source.url) {
+    stopPlayback();
     note('Не задан источник по умолчанию', true);
     return;
   }
@@ -423,6 +424,7 @@ function sync() {
       return;
     }
     audio.onloadedmetadata = null;
+    audio.onerror = null;
     audio.pause();
     youtubeSource = source;
     player.loadVideoById({videoId: vid(source.url), startSeconds: source.start});
@@ -436,17 +438,31 @@ function sync() {
       try { audio.currentTime = source.start; } catch {}
     }
   };
-  const url = new URL(source.url, location.href).href;
-  if (audio.src !== url) {
-    audio.onloadedmetadata = seek;
-    audio.src = url;
-    audio.load();
-  } else {
-    seek();
+  const audioFailed = error => {
+    if (!playing || run !== playRun || last !== source.key) return;
+    stopPlayback();
+    const message = error?.name === 'NotAllowedError'
+      ? 'Браузер заблокировал звук — нажмите ▶ ещё раз'
+      : 'Не удалось воспроизвести аудио — проверьте ссылку';
+    note(message, true);
+  };
+
+  audio.onerror = () => {
+    if (audio.error) audioFailed(audio.error);
+  };
+
+  try {
+    const url = new URL(source.url, location.href).href;
+    if (audio.src !== url) {
+      audio.onloadedmetadata = seek;
+      audio.src = url;
+    } else {
+      seek();
+    }
+    audio.play()?.catch(audioFailed);
+  } catch (error) {
+    audioFailed(error);
   }
-  audio.play().catch(() => {
-    if (playing && run === playRun && last === source.key) note('Нажмите Play, чтобы включить звук');
-  });
 }
 
 const programRotationStart = performance.now();
@@ -484,6 +500,7 @@ function stopPlayback() {
   playRun++;
   last = '';
   audio.onloadedmetadata = null;
+  audio.onerror = null;
   audio.pause();
   audio.removeAttribute('src');
   audio.load();
