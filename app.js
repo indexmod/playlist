@@ -9,8 +9,7 @@ function frame(){let p=now(),x=get(p.day,p.hour),s=p.min*60+p.sec,id=duration(x)
 function isYT(u=''){return/(youtu\.be|youtube\.com)/i.test(u)}function vid(u=''){try{let x=new URL(u);return x.searchParams.get('v')||x.pathname.split('/').filter(Boolean).pop()}catch{return''}}
 function showSlotStatus(cell,program,at=Date.now()){
   const label=cell.querySelector('.slot-author');
-  let status='○ Свободно';
-  if(program)status=program.lockUntil>at?'● Занято':'○ Изменить';
+  const status=program?.lockUntil>at?'● Занято':'○ Свободно';
   const text=program?.author?`${status} · ${program.author}`:status;
   if(label.textContent!==text){
     label.textContent=text;
