@@ -171,24 +171,53 @@ function renderChat(key,el,rows){
       message.style.height='auto';
       message.style.height=message.scrollHeight+'px';
     };
-    message.oninput=resize;
-    message.onblur=async()=>{
-      const text=message.value.trim();
-      if(text===row.text){delete message.dataset.dirty;return}
-      message.dataset.dirty='true';
-      message.readOnly=true;
-      try{
-        const response=await fetch(API+'chat/'+key+'/'+row.id,{
-          method:'PUT',headers:{'Content-Type':'application/json'},
-          body:JSON.stringify({text}),keepalive:true
-        });
-        if(!response.ok)throw Error();
-        row.text=text;
+    const save = async () => {
+      if (message.readOnly) return;
+      const text = message.value.trim();
+      if (text === row.text) {
         delete message.dataset.dirty;
-        await remote(true);
-      }catch{note('Изменения комментария не сохранены — вернитесь в поле и попробуйте ещё раз',true)}
-      finally{message.readOnly=false}
+        return;
+      }
+
+      message.dataset.dirty = 'true';
+      message.readOnly = true;
+      try {
+        const response = await fetch(API + 'chat/' + key + '/' + row.id, {
+          method: 'PUT',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({text}),
+          keepalive: true
+        });
+        if (!response.ok && (text || response.status !== 404)) throw Error();
+        delete message.dataset.dirty;
+
+        if (text) {
+          row.text = text;
+        } else {
+          const wasFocused = document.activeElement === message;
+          item.remove();
+          if (wasFocused) el.parentElement.querySelector('.slot-chat')?.focus({preventScroll: true});
+          note('Комментарий удалён');
+        }
+        remote(true);
+      } catch {
+        note(text
+          ? 'Изменения комментария не сохранены — вернитесь в поле и попробуйте ещё раз'
+          : 'Не удалось удалить комментарий — нажмите Backspace, чтобы повторить', true);
+      } finally {
+        message.readOnly = false;
+      }
     };
+    message.oninput = event => {
+      resize();
+      if (!event.isComposing && message.value === '') save();
+    };
+    message.onkeydown = event => {
+      if (event.key !== 'Backspace' || event.isComposing || event.repeat || message.value) return;
+      event.preventDefault();
+      save();
+    };
+    message.onblur = save;
     item.append(avatar,message);
     items.append(item);
     messages.push(message);
