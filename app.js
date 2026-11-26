@@ -258,47 +258,6 @@ function onProgramEnd(){let a=frame();if(!playing||a.kind!=='program'||last!==a.
 audio.onended=onProgramEnd;
 const youtubeLoadingMessage = 'Нажмите ▶, когда YouTube-плеер загрузится';
 let youtubeSource;
-let manualYoutube;
-
-function showYoutubePanel(visible) {
-  const panel = $('#youtube-panel');
-  panel.classList.toggle('is-visible', visible);
-  panel.setAttribute('aria-hidden', String(!visible));
-  panel.toggleAttribute('inert', !visible);
-}
-
-function offerManualYoutube(source) {
-  const frameKey = frame().key;
-  stopPlayback();
-  manualYoutube = {source, frameKey};
-  showYoutubePanel(true);
-  note('Нажмите ▶ в плеере YouTube, чтобы включить эфир');
-  player.cueVideoById({videoId: vid(source.url), startSeconds: source.start});
-  player.getIframe()?.focus();
-}
-
-function handleYoutubeState(event) {
-  if (event.data === 0) onProgramEnd();
-  if (event.data !== 1 || !manualYoutube) return;
-
-  const {source, frameKey} = manualYoutube;
-  const current = frame();
-  manualYoutube = null;
-  if (current.key !== frameKey) {
-    stopPlayback();
-    note('Передача сменилась — нажмите ▶ в шапке, чтобы включить эфир');
-    return;
-  }
-
-  const start = source.key === current.key ? current.start : source.start;
-  playing = true;
-  playRun++;
-  last = source.key;
-  youtubeSource = source;
-  $('#play').textContent = '❚❚';
-  note('');
-  if (Math.abs(player.getCurrentTime() - start) >= 2) player.seekTo(start, true);
-}
 
 function allowPlayer() {
   const iframe = player?.getIframe?.();
@@ -332,15 +291,20 @@ window.onYouTubeIframeAPIReady = () => {
           note('YouTube-плеер готов к запуску — нажмите ▶');
         }
       },
-      onStateChange: handleYoutubeState,
+      onStateChange: event => {
+        if (event.data === 0) onProgramEnd();
+      },
       onError: () => {
-        if (manualYoutube || (playing && youtubeSource)) {
+        if (playing && youtubeSource) {
           stopPlayback();
           note('Источник YouTube недоступен в этом браузере', true);
         }
       },
       onAutoplayBlocked: () => {
-        if (playing && youtubeSource) offerManualYoutube(youtubeSource);
+        if (playing && youtubeSource) {
+          stopPlayback();
+          note('Браузер заблокировал YouTube — попробуйте ▶ ещё раз', true);
+        }
       }
     }
   });
@@ -377,7 +341,6 @@ function sync() {
   }
 
   youtubeSource = null;
-  showYoutubePanel(false);
   if (ready) player.stopVideo();
   const seek = () => {
     if (playing && run === playRun) {
@@ -416,8 +379,6 @@ async function settings(){let password=window.prompt('Пароль для нас
 function stopPlayback() {
   playing = false;
   youtubeSource = null;
-  manualYoutube = null;
-  showYoutubePanel(false);
   playRun++;
   last = '';
   audio.onloadedmetadata = null;
@@ -441,7 +402,6 @@ function toggle() {
     return;
   }
 
-  if (manualYoutube) stopPlayback();
   note('');
   playing = true;
   playRun++;
