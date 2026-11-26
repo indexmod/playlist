@@ -449,24 +449,26 @@ function sync() {
   });
 }
 
+const programRotationStart = performance.now();
+
 function tick(){
   const date = new Date();
   const current = now(date);
   const seconds = current.min * 60 + current.sec;
   const remaining = 3600 - seconds;
-  const next = now(new Date(date.getTime() + remaining * 1000));
   $('#clock').textContent=new Intl.DateTimeFormat('ru-RU',{
     timeZone:state.settings.timezone,hour:'2-digit',minute:'2-digit',second:'2-digit',hourCycle:'h23'
   }).format(date);
-  const currentTitle = name(get(current.day, current.hour)) || '—';
-  const nextTitle = name(get(next.day, next.hour)) || '—';
-  const nextTime = `${String(next.hour).padStart(2, '0')}:00`;
-  const currentLine = $('#current-title');
-  const nextLine = $('#next-title');
-  const currentText = `Сейчас: ${currentTitle}`;
-  const nextText = `Далее: ${nextTime} ${nextTitle}`;
-  if (currentLine.textContent !== currentText) currentLine.textContent = currentText;
-  if (nextLine.textContent !== nextText) nextLine.textContent = nextText;
+  const showNext = Math.floor((performance.now() - programRotationStart) / 5000) % 2 === 1;
+  const program = showNext ? now(new Date(date.getTime() + remaining * 1000)) : current;
+  const title = name(get(program.day, program.hour)) || '—';
+  const time = `${String(program.hour).padStart(2, '0')}:00`;
+  const text = showNext ? `Далее: ${time} ${title}` : `Сейчас: ${title}`;
+  const line = $('#program-line');
+  if (line.textContent !== text) {
+    line.textContent = text;
+    line.title = text;
+  }
   $('#to-hour').textContent=`${String(Math.floor(remaining/60)).padStart(2,'0')}:${String(remaining%60).padStart(2,'0')}`;
   const currentKey=k(current.day,current.hour);
   document.querySelectorAll('#schedule .slot').forEach(cell=>{
